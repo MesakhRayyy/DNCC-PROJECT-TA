@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>QR Test - TokoKu</title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, Arial;
+        padding: 1rem;
+      }
+      .card {
+        max-width: 480px;
+        margin: 1rem auto;
+        padding: 1rem;
+        border: 1px solid #eee;
+        border-radius: 8px;
+      }
+      img {
+        display: block;
+        margin: 0.75rem auto;
+        max-width: 100%;
+        height: auto;
+      }
+      pre {
+        background: #f7f7f7;
+        padding: 0.5rem;
+        overflow: auto;
+      }
+      .button-group {
+        margin-top: 0.5rem;
+      }
+      .result-container {
+        text-align: center;
+        margin-top: 1rem;
+      }
+      .spinner {
+        display: inline-block;
+        width: 20px;
+        height: 20px;
+        border: 2px solid #f3f3f3;
+        border-top: 2px solid #3498db;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+      @keyframes spin {
+        0% {
+          transform: rotate(0deg);
+        }
+        100% {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h2>QR Generator Test</h2>
+      <p>
+        This page uses the local <code>js/qrcode.min.js</code> bundle and
+        produces a QRIS-like payload for quick scanning.
+      </p>
+
+      <label>Merchant ID: <input id="merchant" value="STORE12345" /></label
+      ><br />
+      <label>Invoice: <input id="invoice" value="INV123456789" /></label><br />
+      <label>Amount (IDR): <input id="amount" value="25000" /></label>
+      <div class="button-group">
+        <button id="gen">Generate QR</button>
+        <button id="genAuto">Generate sample (auto)</button>
+      </div>
+
+      <div id="result" class="result-container">
+        <div id="spinner" style="display: none">Generating…</div>
+        <img id="qrimg" alt="Generated QR" src="" />
+        <div id="payloadBox"></div>
+      </div>
+
+      <h4>Console</h4>
+      <pre id="log"></pre>
+    </div>
+
+    <script src="js/qrcode.min.js"></script>
+    <script>
+      const logEl = document.getElementById("log");
+      const qrImg = document.getElementById("qrimg");
+      const payloadBox = document.getElementById("payloadBox");
+      const spinner = document.getElementById("spinner");
+
+      function log(...args) {
+        console.log(...args);
+        logEl.textContent +=
+          args
+            .map((a) => (typeof a === "object" ? JSON.stringify(a) : String(a)))
+            .join(" ") + "\n";
+      }
+
+      function formatPayload(merchant, invoice, amount) {
+        return `QRIS|MERCHANT:${merchant};INV:${invoice};AMT:${amount};CUR:IDR`;
+      }
+
+      async function generate(payload) {
+        spinner.style.display = "";
+        try {
+          // Try different global names (checkout code handles multiple variants)
+          const lib = window.QRCode || window.qrcode;
+          if (!lib || typeof lib.toDataURL !== "function") {
+            throw new Error("qrcode.toDataURL not found on page");
+          }
+          const dataUrl = await lib.toDataURL(payload, { width: 360 });
+          qrImg.src = dataUrl;
+          payloadBox.innerHTML =
+            "<strong>Payload:</strong><br><code>" + payload + "</code>";
+          log("Generated dataURL length:", dataUrl.length);
+        } catch (err) {
+          log("Error generating QR:", err && err.message ? err.message : err);
+          alert("Error: " + (err && err.message ? err.message : String(err)));
+        } finally {
+          spinner.style.display = "none";
+        }
+      }
+
+      document.getElementById("gen").addEventListener("click", () => {
+        const m = document.getElementById("merchant").value.trim();
+        const inv = document.getElementById("invoice").value.trim();
+        const amt = document.getElementById("amount").value.trim();
+        const payload = formatPayload(
+          m || "STORE12345",
+          inv || "INV" + Date.now(),
+          amt || 0
+        );
+        log("Generating payload:", payload);
+        generate(payload);
+      });
+
+      document.getElementById("genAuto").addEventListener("click", () => {
+        const payload = formatPayload("STORE12345", "INV" + Date.now(), 259295);
+        log("Auto payload:", payload);
+        generate(payload);
+      });
+
+      // Auto-generate on load for convenience
+      window.addEventListener("load", () => {
+        document.getElementById("genAuto").click();
+      });
+    </script>
+  </body>
+</html>

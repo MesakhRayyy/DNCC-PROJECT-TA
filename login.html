@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Login - TokoKu</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="login-page">
+    <main class="login-container">
+      <div class="login-card">
+        <h1 class="brand text-center">TokoKu</h1>
+        <p class="login-subtitle">Silakan login untuk melanjutkan</p>
+
+        <form id="login-form" class="login-form" novalidate>
+          <label>
+            Nama Lengkap
+            <input
+              type="text"
+              id="login-name"
+              required
+              placeholder="Masukkan nama lengkap"
+            />
+            <div class="error" id="err-login-name"></div>
+          </label>
+
+          <label>
+            Email
+            <input
+              type="email"
+              id="login-email"
+              required
+              placeholder="Contoh: email@domain.com"
+            />
+            <div class="error" id="err-login-email"></div>
+          </label>
+
+          <label>
+            No. Telepon
+            <input
+              type="tel"
+              id="login-phone"
+              required
+              placeholder="Contoh: 08123456789"
+            />
+            <div class="error" id="err-login-phone"></div>
+          </label>
+
+          <button type="submit" class="btn primary login-button">Masuk</button>
+        </form>
+      </div>
+    </main>
+
+    <div id="toast" class="toast" aria-live="polite" aria-atomic="true"></div>
+
+    <script src="login.js"></script>
+  </body>
+</html>

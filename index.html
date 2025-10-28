@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Toko Online Demo</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="products-page">
+    <header class="site-header">
+      <div class="container">
+        <h1 class="brand">TokoKu</h1>
+        <div class="search-cart">
+          <input
+            id="search"
+            type="search"
+            placeholder="Cari produk..."
+            aria-label="Cari produk"
+          />
+          <button id="cart-btn" class="cart-btn">
+            Keranjang (<span id="cart-count">0</span>)
+          </button>
+          <!-- Login / profile button -->
+          <button id="login-btn" class="btn" aria-label="Masuk atau profil">
+            Masuk
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="products">
+        <div id="product-grid" class="grid"></div>
+      </section>
+    </main>
+
+    <!-- Cart sidebar -->
+    <aside id="cart" class="cart">
+      <div class="cart-header">
+        <h2>Keranjang</h2>
+        <button id="close-cart" aria-label="Tutup keranjang">×</button>
+      </div>
+      <div id="cart-items" class="cart-items"></div>
+      <div class="cart-footer">
+        <div class="total">Total: Rp <span id="cart-total">0</span></div>
+        <button id="checkout-btn" class="btn primary">Checkout</button>
+      </div>
+    </aside>
+
+    <!-- Checkout modal (Shopee-like layout) -->
+    <div id="checkout-modal" class="modal" aria-hidden="true">
+      <div class="modal-content">
+        <button id="close-checkout" class="modal-close" aria-label="Tutup">
+          ×
+        </button>
+        <h3>Checkout</h3>
+
+        <div class="shopee-checkout">
+          <div class="left-col">
+            <!-- Address card -->
+            <div class="address-card">
+              <div class="address-main">
+                <div class="address-name" id="addr-name">-</div>
+                <div class="address-phone" id="addr-phone">-</div>
+              </div>
+              <div class="address-line" id="addr-line">Belum ada alamat</div>
+              <div class="address-actions">
+                <button id="edit-address" class="btn">Ubah</button>
+              </div>
+            </div>
+
+            <!-- Order items -->
+            <div class="order-items">
+              <h4>Ringkasan Pesanan</h4>
+              <div id="checkout-items" class="checkout-items">
+                (Tidak ada item)
+              </div>
+            </div>
+
+            <!-- Form (inline, editable) -->
+            <form id="checkout-form" class="checkout-form" novalidate>
+              <div class="field two-column">
+                <div>
+                  <label for="cust-name">Nama lengkap</label>
+                  <input
+                    type="text"
+                    id="cust-name"
+                    required
+                    aria-required="true"
+                  />
+                  <div class="error" id="err-name" aria-live="polite"></div>
+                </div>
+                <div>
+                  <label for="cust-phone">Telepon</label>
+                  <input
+                    id="cust-phone"
+                    type="tel"
+                    required
+                    aria-required="true"
+                  />
+                  <div class="error" id="err-phone" aria-live="polite"></div>
+                </div>
+              </div>
+
+              <div class="field">
+                <label for="cust-address">Alamat lengkap</label>
+                <textarea
+                  id="cust-address"
+                  required
+                  aria-required="true"
+                ></textarea>
+                <div class="error" id="err-address" aria-live="polite"></div>
+              </div>
+
+              <div class="field">
+                <label>Metode Pembayaran</label>
+                <div class="payment-grid">
+                  <label class="payment-tile">
+                    <input
+                      type="radio"
+                      name="payment"
+                      value="shopeepay"
+                      checked
+                    />
+                    <span>ShopeePay</span>
+                  </label>
+                  <label class="payment-tile">
+                    <input type="radio" name="payment" value="gopay" />
+                    <span>GoPay</span>
+                  </label>
+                  <label class="payment-tile">
+                    <input type="radio" name="payment" value="dana" />
+                    <span>Dana</span>
+                  </label>
+                  <label class="payment-tile">
+                    <input type="radio" name="payment" value="bank" />
+                    <span>Transfer Bank</span>
+                  </label>
+                </div>
+              </div>
+
+              <div id="bank-select" class="field hidden">
+                <label for="bank">Pilih Bank</label>
+                <select id="bank" class="form-control">
+                  <option value="bca">BCA</option>
+                  <option value="mandiri">Mandiri</option>
+                  <option value="bni">BNI</option>
+                  <option value="bri">BRI</option>
+                </select>
+
+                <div class="bank-info mt-3">
+                  <div class="bank-account-info">
+                    <div id="bca-info" class="bank-detail-box hidden">
+                      <h4>Bank BCA</h4>
+                      <div class="account-detail">
+                        <p class="account-number">1234 5678 9012</p>
+                        <p class="account-name">a.n. TokoKu Official</p>
+                      </div>
+                    </div>
+
+                    <div id="mandiri-info" class="bank-detail-box hidden">
+                      <h4>Bank Mandiri</h4>
+                      <div class="account-detail">
+                        <p class="account-number">123-00-1234567-8</p>
+                        <p class="account-name">a.n. TokoKu Official</p>
+                      </div>
+                    </div>
+
+                    <div id="bni-info" class="bank-detail-box hidden">
+                      <h4>Bank BNI</h4>
+                      <div class="account-detail">
+                        <p class="account-number">012 3456 789</p>
+                        <p class="account-name">a.n. TokoKu Official</p>
+                      </div>
+                    </div>
+
+                    <div id="bri-info" class="bank-detail-box hidden">
+                      <h4>Bank BRI</h4>
+                      <div class="account-detail">
+                        <p class="account-number">0123 01 123456 12-3</p>
+                        <p class="account-name">a.n. TokoKu Official</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="transfer-instructions">
+                    <h4>Langkah Pembayaran:</h4>
+                    <ol>
+                      <li>Catat nomor rekening yang ditampilkan</li>
+                      <li>
+                        Transfer sesuai total pembayaran:
+                        <strong>Rp <span class="total-amount">0</span></strong>
+                      </li>
+                      <li>Simpan bukti transfer</li>
+                      <li>Upload bukti pembayaran di bawah ini</li>
+                    </ol>
+                  </div>
+
+                  <div class="upload-section mt-3">
+                    <label for="payment-proof">Upload Bukti Transfer:</label>
+                    <input
+                      type="file"
+                      id="payment-proof"
+                      accept="image/*"
+                      class="form-control"
+                    />
+                    <p class="upload-note">*Format: JPG, PNG, maksimal 5MB</p>
+                  </div>
+                </div>
+              </div>
+              <script>
+                function handlePaymentChange(radio) {
+                  const bankSelect = document.getElementById("bank-select");
+                  if (radio.value === "bank") {
+                    bankSelect.classList.remove("hidden");
+                    const bankDropdown = document.getElementById("bank");
+                    if (bankDropdown) {
+                      const selectedBank = document.getElementById(
+                        bankDropdown.value + "-info"
+                      );
+                      if (selectedBank) {
+                        // Hide all bank details first
+                        document
+                          .querySelectorAll(".bank-details")
+                          .forEach((el) => {
+                            el.classList.add("hidden");
+                          });
+                        // Show selected bank details
+                        selectedBank.classList.remove("hidden");
+                      }
+                    }
+                  } else {
+                    bankSelect.classList.add("hidden");
+                    // Hide all bank details
+                    document.querySelectorAll(".bank-details").forEach((el) => {
+                      el.classList.add("hidden");
+                    });
+                  }
+                }
+
+                // Initialize bank dropdown handler
+                document
+                  .getElementById("bank")
+                  ?.addEventListener("change", function () {
+                    // Hide all bank details first
+                    document.querySelectorAll(".bank-details").forEach((el) => {
+                      el.classList.add("hidden");
+                    });
+                    // Show selected bank details
+                    const selectedBank = document.getElementById(
+                      this.value + "-info"
+                    );
+                    if (selectedBank) {
+                      selectedBank.classList.remove("hidden");
+                    }
+                  });
+              </script>
+
+              <div id="bank-select" class="field hidden">
+                <label for="bank">Pilih Bank</label>
+
+                <select id="bank">
+                  <option value="bca">BCA</option>
+                  <option value="mandiri">Mandiri</option>
+                  <option value="bri">BRI</option>
+                  <option value="bni">BNI</option>
+                </select>
+                <div class="bank-info mt-3">
+                  <div class="bank-account-info">
+                    <p><strong>Nomor Rekening:</strong></p>
+                    <div id="bca-info" class="bank-details hidden">
+                      <p>Bank BCA</p>
+                      <p class="account-number">1234-5678-9012</p>
+                      <p>a.n. TokoKu Official</p>
+                    </div>
+                    <div id="mandiri-info" class="bank-details hidden">
+                      <p>Bank Mandiri</p>
+                      <p class="account-number">123-00-1234567-8</p>
+                      <p>a.n. TokoKu Official</p>
+                    </div>
+                    <div id="bni-info" class="bank-details hidden">
+                      <p>Bank BNI</p>
+                      <p class="account-number">012-3456-789</p>
+                      <p>a.n. TokoKu Official</p>
+                    </div>
+                    <div id="bri-info" class="bank-details hidden">
+                      <p>Bank BRI</p>
+                      <p class="account-number">0123-01-123456-12-3</p>
+                      <p>a.n. TokoKu Official</p>
+                    </div>
+                  </div>
+                  <div class="payment-instructions mt-3">
+                    <p><strong>Langkah Pembayaran:</strong></p>
+                    <ol>
+                      <li>Pilih bank tujuan transfer</li>
+                      <li>Catat nomor rekening yang ditampilkan</li>
+                      <li>Transfer sesuai total pembayaran</li>
+                      <li>Simpan bukti transfer</li>
+                      <li>Upload bukti transfer setelah pembayaran</li>
+                    </ol>
+                    <p class="note">
+                      *Pesanan akan diproses setelah pembayaran dikonfirmasi
+                    </p>
+                  </div>
+                  <div class="upload-proof mt-3 hidden" id="upload-section">
+                    <label for="payment-proof">Upload Bukti Transfer:</label>
+                    <input
+                      type="file"
+                      id="payment-proof"
+                      accept="image/*"
+                      class="form-control"
+                    />
+                  </div>
+                </div>
+              </div>
+            </form>
+          </div>
+
+          <aside class="summary-card">
+            <h4>Ringkasan</h4>
+            <div class="summary-lines">
+              <div class="line">
+                <span>Subtotal</span
+                ><strong>Rp <span id="checkout-subtotal">0</span></strong>
+              </div>
+              <div class="line">
+                <span>Ongkos kirim</span
+                ><strong id="checkout-shipping">Rp 0</strong>
+              </div>
+              <div class="total-line">
+                <span>Total</span
+                ><strong>Rp <span id="checkout-total">0</span></strong>
+              </div>
+            </div>
+            <div class="summary-actions">
+              <button type="button" id="cancel-checkout" class="btn">
+                Batal
+              </button>
+              <button
+                type="button"
+                id="submit-order"
+                class="btn primary"
+                disabled
+              >
+                Bayar
+              </button>
+            </div>
+          </aside>
+        </div>
+
+        <!-- Checkout complete (kept inline) -->
+        <div id="checkout-complete" class="checkout-complete" hidden>
+          <div class="complete-inner" id="complete-inner">
+            <div class="complete-svg-container">
+              <svg
+                id="complete-svg"
+                class="complete-svg"
+                viewBox="0 0 120 120"
+                aria-hidden="true"
+              >
+                <circle
+                  class="check-circle"
+                  cx="60"
+                  cy="60"
+                  r="52"
+                  stroke="#4CAF50"
+                  stroke-width="4"
+                />
+                <g transform="translate(60 60) scale(3)">
+                  <g transform="translate(-12 -12)">
+                    <path
+                      class="check-check"
+                      d="M9 16.17L4.83 12 3.41 13.41 9 19 21 7 19.59 5.59z"
+                      fill="none"
+                      stroke="#fff"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                    <path
+                      class="check-fill"
+                      d="M9 16.17L4.83 12 3.41 13.41 9 19 21 7 19.59 5.59z"
+                      fill="#ffffff"
+                      opacity="0"
+                    />
+                  </g>
+                </g>
+              </svg>
+              <span class="visually-hidden" aria-live="polite"
+                >Pesanan selesai</span
+              >
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast notifications -->
+    <div id="toast" class="toast" aria-live="polite" aria-atomic="true"></div>
+
+    <!-- Mobile bottom summary (visible on small screens) -->
+    <div class="mobile-summary-bar" id="mobile-summary">
+      <div class="total">Total: Rp <span id="mobile-total">0</span></div>
+      <button id="mobile-pay" class="btn primary pay-btn">Bayar</button>
+    </div>
+
+    <footer class="site-footer">
+      <div class="container">
+        &copy; <span id="year"></span> TokoKu — Demo jual beli online
+      </div>
+    </footer>
+
+    <script
+      src="app.js"
+      onerror="alert('Gagal memuat app.js. Silakan muat ulang halaman.')"
+    ></script>
+    <script>
+      // Handle payment methods and bank details
+      function initPaymentHandlers() {
+        const paymentRadios = document.querySelectorAll(
+          'input[name="payment"]'
+        );
+        const bankSelect = document.getElementById("bank-select");
+        const bankDropdown = document.getElementById("bank");
+
+        paymentRadios.forEach((radio) => {
+          radio.addEventListener("change", function () {
+            console.log("Payment method:", this.value);
+            if (this.value === "bank") {
+              bankSelect.classList.remove("hidden");
+              // Show initial bank details
+              const selectedBank = document.getElementById(
+                bankDropdown.value + "-info"
+              );
+              if (selectedBank) {
+                document.querySelectorAll(".bank-detail-box").forEach((el) => {
+                  el.classList.add("hidden");
+                });
+                selectedBank.classList.remove("hidden");
+              }
+            } else {
+              bankSelect.classList.add("hidden");
+            }
+          });
+        });
+
+        if (bankDropdown) {
+          bankDropdown.addEventListener("change", function () {
+            document.querySelectorAll(".bank-detail-box").forEach((el) => {
+              el.classList.add("hidden");
+            });
+            const selectedBank = document.getElementById(this.value + "-info");
+            if (selectedBank) {
+              selectedBank.classList.remove("hidden");
+            }
+          });
+        }
+      }
+
+      // Initialize on page load
+      document.addEventListener("DOMContentLoaded", function () {
+        const mobileSummary = document.getElementById("mobile-summary");
+        if (mobileSummary) {
+          mobileSummary.style.display = "none";
+        }
+
+        // Initialize payment handlers
+        initPaymentHandlers();
+      });
+      document.addEventListener("DOMContentLoaded", function () {
+        const mobileSummary = document.getElementById("mobile-summary");
+        if (mobileSummary) {
+          mobileSummary.style.display = "none";
+        }
+
+        // Handle bank payment method
+        const paymentRadios = document.querySelectorAll(
+          'input[name="payment"]'
+        );
+        const bankSelect = document.getElementById("bank-select");
+        const bankDropdown = document.getElementById("bank");
+        const uploadSection = document.getElementById("upload-section");
+
+        // Show/hide bank selection when payment method changes
+        paymentRadios.forEach((radio) => {
+          radio.addEventListener("change", function () {
+            if (this.value === "bank") {
+              bankSelect.classList.remove("hidden");
+            } else {
+              bankSelect.classList.add("hidden");
+            }
+          });
+        });
+
+        // Show relevant bank details when bank is selected
+        bankDropdown.addEventListener("change", function () {
+          // Hide all bank details first
+          document.querySelectorAll(".bank-details").forEach((el) => {
+            el.classList.add("hidden");
+          });
+
+          // Show selected bank details
+          const selectedBank = document.getElementById(this.value + "-info");
+          if (selectedBank) {
+            selectedBank.classList.remove("hidden");
+            uploadSection.classList.remove("hidden");
+          }
+        });
+
+        // Handle file upload
+        const paymentProof = document.getElementById("payment-proof");
+        if (paymentProof) {
+          paymentProof.addEventListener("change", function (e) {
+            if (e.target.files && e.target.files[0]) {
+              // You could add preview functionality here
+              console.log("File selected:", e.target.files[0].name);
+              // Enable the payment button if needed
+              const submitBtn = document.getElementById("submit-order");
+              if (submitBtn) submitBtn.disabled = false;
+            }
+          });
+        }
+      });
+    </script>
+  </body>
+</html>

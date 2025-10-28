@@ -1,0 +1,3084 @@
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Checkout - TokoKu</title>
+    <link rel="stylesheet" href="styles.css" />
+  <!-- QR Code library -->
+  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+  <script>
+    // Load cart data from localStorage when page loads
+    let cart = JSON.parse(localStorage.getItem('cart') || '{}');
+
+    // Toast notification function
+    function showToast(message, type = 'info', duration = 3000) {
+      const toast = document.createElement('div');
+      toast.className = `toast toast-${type}`;
+      toast.textContent = message;
+      document.body.appendChild(toast);
+      
+      setTimeout(() => {
+        toast.classList.add('show');
+      }, 100);
+
+      setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 300);
+      }, duration);
+    }
+
+    // Show checkout complete modal
+    function showCheckoutComplete({ id, offline, order }) {
+      const modal = document.createElement('div');
+      modal.className = 'modal checkout-complete';
+      modal.innerHTML = `
+        <div class="modal-content">
+          <h2>Pesanan Berhasil!</h2>
+          <p>ID Pesanan: ${id}</p>
+          ${offline ? '<p class="offline-notice">Mode Offline: Pesanan disimpan secara lokal</p>' : ''}
+          <div class="order-summary">
+            <h3>Ringkasan Pesanan:</h3>
+            <p><strong>Nama:</strong> ${order.name}</p>
+            <p><strong>Alamat:</strong> ${order.address}</p>
+            <p><strong>Total:</strong> Rp${order.total.toLocaleString()}</p>
+          </div>
+          <button onclick="this.closest('.modal').remove()">Tutup</button>
+        </div>
+      `;
+      document.body.appendChild(modal);
+    }
+
+    function clearCheckoutErrors() {
+      const errorElements = document.querySelectorAll('[id^="err-"]');
+      errorElements.forEach(el => el.textContent = '');
+    }
+
+    // Initialize QR code generator
+    let qrcode = null;
+    function initQRCode(text) {
+      const qrContainer = document.getElementById('qr-code');
+      if (!qrContainer) return;
+      if (qrcode) qrcode.clear();
+      qrcode = new QRCode(qrContainer, {
+        text: text || 'Empty cart',
+        width: 128,
+        height: 128
+      });
+    }
+
+    // Cart management functions
+    function saveCart() {
+      localStorage.setItem('cart', JSON.stringify(cart));
+      renderCart();
+      updateQRCode();
+    }
+
+    function updateQRCode() {
+      const orderData = {
+        items: Object.values(cart).map(item => ({
+          id: item.product.id,
+          name: item.product.name,
+          qty: item.qty,
+          price: item.product.price
+        })),
+        total: calcTotal()
+      };
+      initQRCode(JSON.stringify(orderData));
+    }
+
+    function renderCart() {
+      const cartContainer = document.getElementById('cart-items');
+      const totalElement = document.getElementById('total-amount');
+      if (!cartContainer) return;
+
+      cartContainer.innerHTML = '';
+      
+      if (Object.keys(cart).length === 0) {
+        cartContainer.innerHTML = '<div class="empty-cart">Keranjang kosong</div>';
+        if (totalElement) totalElement.textContent = 'Rp0';
+        return;
+      }
+
+      Object.values(cart).forEach(item => {
+        const itemElement = document.createElement('div');
+        itemElement.className = 'cart-item';
+        itemElement.innerHTML = `
+          <img src="${item.product.image || 'placeholder.jpg'}" class="product-image" alt="${item.product.name}">
+          <div class="product-info">
+            <h3 class="product-name">${item.product.name}</h3>
+            <div class="price-container">
+              <span class="current-price">Rp${item.product.price.toLocaleString()}</span>
+            </div>
+            <div class="quantity-controls">
+              <button onclick="updateQuantity(${item.product.id}, ${item.qty - 1})">-</button>
+              <span>${item.qty}</span>
+              <button onclick="updateQuantity(${item.product.id}, ${item.qty + 1})">+</button>
+            </div>
+          </div>
+          <button class="remove-btn" onclick="removeItem(${item.product.id})">Hapus</button>
+        `;
+        cartContainer.appendChild(itemElement);
+      });
+
+      if (totalElement) {
+        totalElement.textContent = 'Rp' + calcTotal().toLocaleString();
+      }
+    }
+
+    function updateQuantity(productId, newQty) {
+      if (newQty <= 0) {
+        delete cart[productId];
+      } else {
+        cart[productId].qty = newQty;
+      }
+      saveCart();
+    }
+
+    function removeItem(productId) {
+      delete cart[productId];
+      saveCart();
+      showToast('Item dihapus dari keranjang', 'success');
+    }
+
+    function calcTotal() {
+      return Object.values(cart).reduce((total, item) => 
+        total + (item.product.price * item.qty), 0);
+    }
+
+    // Initialize cart on page load
+    document.addEventListener('DOMContentLoaded', function() {
+      renderCart();
+      updateQRCode();
+      
+      // Handle bank payment method
+      const paymentRadios = document.querySelectorAll('input[name="payment"]');
+      const bankSelect = document.getElementById('bank-select');
+      const bankDropdown = document.getElementById('bank');
+      
+      // Show/hide bank selection when payment method changes
+      paymentRadios.forEach(radio => {
+        radio.addEventListener('change', function() {
+          if (this.value === 'bank') {
+            bankSelect.classList.remove('hidden');
+            // Show initial bank details
+            const selectedBank = document.getElementById(bankDropdown.value + '-info');
+            if (selectedBank) {
+              selectedBank.classList.remove('hidden');
+            }
+          } else {
+            bankSelect.classList.add('hidden');
+            // Hide all bank details
+            document.querySelectorAll('.bank-details').forEach(el => {
+              el.classList.add('hidden');
+            });
+          }
+        });
+      });
+      
+      // Handle bank selection change
+      if (bankDropdown) {
+        bankDropdown.addEventListener('change', function() {
+          // Hide all bank details first
+          document.querySelectorAll('.bank-details').forEach(el => {
+            el.classList.add('hidden');
+          });
+          
+          // Show selected bank details
+          const selectedBank = document.getElementById(this.value + '-info');
+          if (selectedBank) {
+            selectedBank.classList.remove('hidden');
+          }
+        });
+      }
+      
+      // Payment and form validation will be handled by the form submit event listener
+    }
+   );
+  </script>
+    <style>
+      /* Typography */
+      .text-center {
+        text-align: center;
+      }
+
+      .text-sm {
+        font-size: 0.9rem;
+      }
+
+      .text-md {
+        font-size: 1.1rem;
+      }
+
+      .text-lg {
+        font-size: 1.3rem;
+      }
+
+      /* Layout and positioning */
+      .back-link {
+        display: inline-block;
+        margin-bottom: 6px;
+        color: #00a65a;
+        text-decoration: none;
+        font-weight: 600;
+      }
+
+      .flex-center {
+        display: flex;
+        align-items: center;
+      }
+
+      .relative {
+        position: relative;
+      }
+
+      /* Payment details */
+      .payment-detail-panel {
+        position: relative;
+        margin-top: 1rem;
+        padding: 1rem;
+        border: 1px solid #e6e6e6;
+        border-radius: 8px;
+        background: #fff;
+      }
+
+      /* Address display */
+      .address-display {
+        padding: 0.75rem;
+        border: 1px solid #e6f4ea;
+        border-radius: 6px;
+        background: #f7fffb;
+      }
+
+      .address-row {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-bottom: 0.25rem;
+      }
+
+      .address-line {
+        color: #333;
+        line-height: 1.3;
+      }
+
+      .address-phone {
+        color: #666;
+        margin-top: 0.25rem;
+        font-size: 0.95rem;
+      }
+
+      /* Margin utilities */
+      .ml-2 {
+        margin-left: 0.5rem;
+      }
+
+      /* Custom utility classes */
+      .mt-2 {
+        margin-top: 0.5rem;
+      }
+      
+      .mt-3 {
+        margin-top: 0.75rem;
+      }
+
+      .location-icon {
+        color: #00a65a;
+        font-size: 1.1rem;
+      }
+
+      .font-bold {
+        font-weight: 700;
+      }
+
+      .text-danger {
+        color: #ee4d2d;
+      }
+
+      .text-muted {
+        color: #666;
+      }
+
+      .d-none {
+        display: none;
+      }
+
+      /* Toast notifications */
+      .toast {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        padding: 12px 24px;
+        background: #333;
+        color: white;
+        border-radius: 4px;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+        z-index: 1000;
+      }
+      
+      .toast.show {
+        opacity: 1;
+      }
+      
+      .toast.toast-success {
+        background: #4caf50;
+      }
+      
+      .toast.toast-error {
+        background: #f44336;
+      }
+      
+      .toast.toast-warning {
+        background: #ff9800;
+      }
+
+      /* Modal styling */
+      .modal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 1000;
+      }
+
+      .modal-content {
+        background: white;
+        padding: 2rem;
+        border-radius: 8px;
+        max-width: 500px;
+        width: 90%;
+      }
+
+      /* QR Code styling */
+      .qr-container {
+        background: #fff;
+        padding: 1rem;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        margin: 1rem auto;
+        text-align: center;
+        max-width: 280px;
+      }
+
+      .qr-container img {
+        display: block;
+        max-width: 100%;
+        height: auto;
+        margin: 0 auto;
+      }
+
+      .qr-instructions {
+        margin: 1rem 0;
+        padding: 1rem;
+        background: #f8f9fa;
+        border-radius: 8px;
+        font-size: 0.95rem;
+        line-height: 1.5;
+      }
+
+      .qr-amount {
+        margin: 1rem 0;
+        font-size: 1.25rem;
+        font-weight: bold;
+        color: #ee4d2d;
+      }
+
+      .modal h2 {
+        margin-top: 0;
+        color: #2c3e50;
+      }
+
+      .order-summary {
+        margin: 1rem 0;
+        padding: 1rem;
+        background: #f8f9fa;
+        border-radius: 4px;
+      }
+
+      .offline-notice {
+        color: #856404;
+        background-color: #fff3cd;
+        border: 1px solid #ffeeba;
+        padding: 0.75rem;
+        border-radius: 4px;
+        margin: 1rem 0;
+      }
+
+      /* Cart item styling */
+      .cart-item {
+        display: flex;
+        align-items: flex-start;
+        padding: 1rem;
+        border: 1px solid #eee;
+        border-radius: 8px;
+        margin-bottom: 1rem;
+        background: #fff;
+      }
+
+      .cart-item .checkbox-container {
+        padding: 0.5rem 1rem 0 0;
+      }
+
+      .cart-item .checkbox-container input[type="checkbox"] {
+        width: 20px;
+        height: 20px;
+        border: 2px solid #00a65a;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+
+      .cart-item .product-image {
+        width: 100px;
+        height: 100px;
+        object-fit: cover;
+        border-radius: 8px;
+        margin-right: 1rem;
+      }
+
+      .cart-item .product-info {
+        flex: 1;
+      }
+
+      .cart-item .product-name {
+        font-size: 1rem;
+        font-weight: 500;
+        margin: 0 0 0.5rem 0;
+        color: #333;
+      }
+
+      .cart-item .price-container {
+        display: flex;
+        align-items: center;
+        margin: 0.5rem 0;
+      }
+
+      .cart-item .current-price {
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: #00a65a;
+      }
+
+      .cart-item .original-price {
+        text-decoration: line-through;
+        color: #999;
+        font-size: 0.9rem;
+        margin-left: 0.5rem;
+      }
+
+      .cart-item .discount-badge {
+        background: #ff4c4c;
+        color: white;
+        padding: 0.2rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.8rem;
+        margin-right: 0.5rem;
+      }
+
+      .cart-item .quantity-controls {
+        display: flex;
+        align-items: center;
+        margin-top: 0.5rem;
+      }
+
+      .cart-item .quantity-controls button {
+        width: 32px;
+        height: 32px;
+        border: 1px solid #ddd;
+        background: white;
+        border-radius: 4px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        font-size: 1.2rem;
+        transition: all 0.2s;
+      }
+
+      .cart-item .quantity-controls button:hover {
+        background: #f5f5f5;
+      }
+
+      .cart-item .quantity-controls span {
+        padding: 0 1rem;
+        font-size: 1rem;
+        min-width: 40px;
+        text-align: center;
+      }
+
+      .cart-item .remove-btn {
+        color: #666;
+        background: none;
+        border: none;
+        padding: 0.5rem;
+        cursor: pointer;
+        font-size: 0.9rem;
+        display: flex;
+        align-items: center;
+      }
+
+      .cart-item .remove-btn:hover {
+        color: #ff4c4c;
+      }
+
+      /* Logo hover animation */
+      .brand a {
+        color: inherit;
+        text-decoration: none;
+        display: inline-block;
+        position: relative;
+        padding: 2px 4px;
+        transition: transform 0.2s;
+      }
+
+      .brand a:hover {
+        transform: translateY(-2px);
+      }
+
+      .brand a::after {
+        content: "";
+        position: absolute;
+        bottom: -2px;
+        left: 0;
+        width: 100%;
+        height: 2px;
+        background: #00a65a;
+        transform: scaleX(0);
+        transition: transform 0.2s;
+      }
+
+      .brand a:hover::after {
+        transform: scaleX(1);
+      }
+
+      /* Cart item styling */
+      .cart-item {
+        display: flex;
+        align-items: flex-start;
+        padding: 1rem;
+        border: 1px solid #eee;
+        border-radius: 8px;
+        margin-bottom: 1rem;
+        background: #fff;
+      }
+
+      .cart-item .checkbox-container {
+        padding: 0.5rem 1rem 0 0;
+      }
+
+      .cart-item .checkbox-container input[type="checkbox"] {
+        width: 20px;
+        height: 20px;
+        border: 2px solid #00a65a;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+
+      .cart-item .product-image {
+        width: 100px;
+        height: 100px;
+        object-fit: cover;
+        border-radius: 8px;
+        margin-right: 1rem;
+      }
+
+      .cart-item .product-info {
+        flex: 1;
+      }
+
+      .cart-item .product-name {
+        font-size: 1rem;
+        font-weight: 500;
+        margin: 0 0 0.5rem 0;
+        color: #333;
+      }
+
+      .cart-item .price-container {
+        display: flex;
+        align-items: center;
+        margin: 0.5rem 0;
+      }
+
+      .cart-item .current-price {
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: #00a65a;
+      }
+
+      .cart-item .original-price {
+        text-decoration: line-through;
+        color: #999;
+        font-size: 0.9rem;
+        margin-left: 0.5rem;
+      }
+
+      .cart-item .discount-badge {
+        background: #ff4c4c;
+        color: white;
+        padding: 0.2rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.8rem;
+        margin-right: 0.5rem;
+      }
+
+      .cart-item .quantity-controls {
+        display: flex;
+        align-items: center;
+        margin-top: 0.5rem;
+      }
+
+      .cart-item .quantity-controls button {
+        width: 32px;
+        height: 32px;
+        border: 1px solid #ddd;
+        background: white;
+        border-radius: 4px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        font-size: 1.2rem;
+        transition: all 0.2s;
+      }
+
+      .cart-item .quantity-controls button:hover {
+        background: #f5f5f5;
+      }
+
+      .cart-item .quantity-controls button:active {
+        background: #eee;
+      }
+
+      .cart-item .quantity-controls span {
+        padding: 0 1rem;
+        font-size: 1rem;
+        min-width: 40px;
+        text-align: center;
+      }
+
+      .cart-item .remove-btn {
+        color: #666;
+        background: none;
+        border: none;
+        padding: 0.5rem;
+        cursor: pointer;
+        font-size: 0.9rem;
+        display: flex;
+        align-items: center;
+        margin-top: 0.5rem;
+      }
+
+      .cart-item .remove-btn:hover {
+        color: #ff4c4c;
+      }
+
+      /* Confetti animation */
+      @keyframes confetti {
+        0% {
+          transform: translateY(0) rotateZ(0);
+          opacity: 1;
+        }
+        100% {
+          transform: translateY(100vh) rotateZ(360deg);
+          opacity: 0;
+        }
+      }
+
+      .confetti-piece {
+        position: absolute;
+        width: 10px;
+        height: 10px;
+        background: #00a65a;
+        top: -20px;
+        opacity: 0;
+      }
+
+      .payment-modal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+        -webkit-backdrop-filter: blur(2px);
+        backdrop-filter: blur(2px);
+      }
+
+      .payment-modal::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(255, 255, 255, 0.85);
+        opacity: 0;
+        transition: opacity 0.3s ease;
+      }
+
+      .payment-modal.fade-in::before {
+        opacity: 1;
+      }
+
+      .payment-modal.fade-out::before {
+        opacity: 0;
+      }
+
+      .payment-modal .modal-content {
+        background: white;
+        padding: 2rem;
+        border-radius: 12px;
+        width: 90%;
+        max-width: 500px;
+        position: relative;
+        transform: translateY(20px);
+        transition: all 0.3s ease;
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+        opacity: 0;
+      }
+
+      .payment-modal.fade-in .modal-content {
+        transform: translateY(0);
+        opacity: 1;
+      }
+
+      .payment-modal .close-btn {
+        position: absolute;
+        right: 1rem;
+        top: 1rem;
+        background: none;
+        border: none;
+        font-size: 1.5rem;
+        cursor: pointer;
+        color: #666;
+      }
+
+      .payment-modal .modal-body {
+        margin-top: 1rem;
+      }
+
+      .payment-modal .va-number {
+        background: #f5f5f5;
+        padding: 1rem;
+        border-radius: 4px;
+        font-family: monospace;
+        font-size: 1.2rem;
+        text-align: center;
+        margin: 1rem 0;
+      }
+
+      @keyframes checkmarkFade {
+        0% {
+          opacity: 0;
+          transform: scale(0.8);
+        }
+        50% {
+          opacity: 1;
+          transform: scale(1.2);
+        }
+        100% {
+          opacity: 1;
+          transform: scale(1);
+        }
+      }
+
+      .success-checkmark {
+        width: 64px;
+        height: 64px;
+        background: #00a65a;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 1rem auto;
+        animation: checkmarkFade 0.5s ease-out forwards;
+      }
+
+      .success-checkmark svg {
+        width: 32px;
+        height: 32px;
+        fill: white;
+      }
+
+      .payment-success {
+        text-align: center;
+        padding: 2rem;
+        background: #fff;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
+
+      .payment-success h3 {
+        color: #00a65a;
+        margin: 1rem 0;
+      }
+
+      .payment-success p {
+        color: #666;
+        margin-bottom: 1rem;
+      }
+
+      .maps-unavailable {
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #666;
+        background: #f5f6f7;
+        padding: 1.5rem;
+        text-align: center;
+        font-size: 0.95rem;
+        line-height: 1.5;
+      }
+      .maps-unavailable code {
+        background: #fff;
+        padding: 0.2rem 0.4rem;
+        border-radius: 3px;
+        border: 1px solid #e0e0e0;
+        font-family: monospace;
+        font-size: 0.9em;
+      }
+      #map-container {
+        height: 300px;
+        margin-top: 0.5rem;
+        border-radius: 4px;
+        overflow: hidden;
+      }
+      #map {
+        height: 100%;
+        width: 100%;
+      }
+      .pac-container {
+        z-index: 1050;
+      }
+      .payment-methods {
+        background: #fff;
+        border-radius: 8px;
+        padding: 1rem;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+      }
+
+      .payment-options {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+
+      .payment-option {
+        display: flex;
+        align-items: center;
+        padding: 1rem;
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+      }
+
+      .payment-option:hover {
+        border-color: #00a65a;
+        background: #f8fff9;
+      }
+
+      .payment-option input[type="radio"] {
+        display: none;
+      }
+
+      .radio-custom {
+        width: 20px;
+        height: 20px;
+        border: 2px solid #00a65a;
+        border-radius: 50%;
+        margin-right: 1rem;
+        position: relative;
+      }
+
+      .radio-custom:after {
+        content: "";
+        width: 10px;
+        height: 10px;
+        background: #00a65a;
+        border-radius: 50%;
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%) scale(0);
+        transition: transform 0.2s ease;
+      }
+
+      .payment-option input[type="radio"]:checked + .radio-custom:after {
+        transform: translate(-50%, -50%) scale(1);
+      }
+
+      .payment-option input[type="radio"]:checked ~ .option-content {
+        color: #00a65a;
+      }
+
+      .option-content {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .option-title {
+        font-weight: 500;
+        font-size: 1rem;
+        color: #333;
+      }
+
+      .option-desc {
+        font-size: 0.9rem;
+        color: #666;
+        margin-top: 0.25rem;
+      }
+
+      .bank-icons {
+        height: 24px;
+        margin-top: 0.5rem;
+      }
+
+      .store-logos {
+        display: flex;
+        gap: 1rem;
+        margin-top: 0.5rem;
+        color: #666;
+        font-size: 0.9rem;
+      }
+
+      .shopeepay-info {
+        margin-top: 0.5rem;
+      }
+
+      .cashback-tag {
+        display: inline-block;
+        background: #ee4d2d;
+        color: white;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 0.8rem;
+        font-weight: 500;
+      }
+
+      /* Add ShopeePay color when selected */
+      .payment-option input[type="radio"][value="shopeepay"]:checked + .radio-custom:after {
+        background: #ee4d2d;
+      }
+
+      .payment-option input[type="radio"][value="shopeepay"]:checked ~ .option-content {
+        color: #ee4d2d;
+      }
+
+      .payment-methods .header {
+        margin-bottom: 1rem;
+      }
+
+      .payment-methods .header h4 {
+        margin: 0;
+        color: #333;
+      }
+
+      /* Prevent modal-like dimming on address input */
+      .pac-container {
+        z-index: 2000 !important; /* Ensure dropdown shows above other elements */
+      }
+
+      /* Style for the pay button */
+      .pay-button {
+        width: 100%;
+        padding: 1rem;
+        background: #00a65a;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background-color 0.2s;
+      }
+
+      .pay-button:hover {
+        background: #008d4c;
+      }
+
+      .pay-button:disabled {
+        background: #cccccc;
+        cursor: not-allowed;
+      }
+
+      .order-items-list {
+        margin-bottom: 1.5rem;
+      }
+      .order-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.5rem 0;
+        border-bottom: 1px solid #eee;
+      }
+      .order-item:last-child {
+        border-bottom: none;
+      }
+      .order-item .item-name {
+        flex: 1;
+      }
+      .order-item .item-quantity {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin: 0 1rem;
+      }
+      .order-item .item-price {
+        text-align: right;
+        white-space: nowrap;
+      }
+      .order-summary {
+        margin-top: 2rem;
+        padding: 1rem;
+        background: #f8f9fa;
+        border-radius: 8px;
+      }
+      .order-summary h4 {
+        margin-bottom: 1rem;
+      }
+      .summary-details {
+        margin-bottom: 1.5rem;
+      }
+      .summary-line {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 0.5rem;
+        color: #666;
+      }
+      .summary-line.total {
+        margin-top: 1rem;
+        padding-top: 1rem;
+        border-top: 1px solid #ddd;
+        font-weight: bold;
+        color: #000;
+      }
+      .summary-line .amount {
+        font-family: monospace;
+      }
+      .pay-button {
+        width: 100%;
+        padding: 1rem;
+        background: #00a65a;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-size: 1rem;
+        font-weight: bold;
+        cursor: pointer;
+        margin-top: 1rem;
+      }
+      .pay-button:hover {
+        background: #008d4c;
+      }
+    </style>
+  </head>
+  <body
+    class="checkout-page"
+    data-gmaps-api-key="AIzaSyB41DRUbKWJHPxaFjMAwdrzWzbVKartNGg"
+  >
+    <header class="site-header">
+      <div class="container">
+        <a href="index.html" id="back-to-products" class="back-link">← Kembali ke Barang</a
+        >
+        <h1 class="brand">TokoKu</h1>
+        <div class="search-cart">
+          <input
+            id="search"
+            type="search"
+            placeholder="Cari produk..."
+            aria-label="Cari produk"
+          />
+          <button id="cart-btn" class="cart-btn">
+            Keranjang (<span id="cart-count">0</span>)
+          </button>
+          <button id="login-btn" class="btn">Masuk</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="checkout-area">
+        <div class="shopee-checkout">
+          <div class="left-col">
+            <!-- Address card -->
+            <!-- <div class="address-card">
+              <div class="address-main">
+                <div class="address-name" id="addr-name">-</div>
+                <div class="address-phone" id="addr-phone">-</div>
+              </div>
+              <div class="address-line" id="addr-line">Belum ada alamat</div>
+              <div class="address-actions">
+                <button id="edit-address" class="btn">Ubah</button>
+              </div>
+            </div> -->
+
+            <!-- Order items -->
+            <div class="order-items">
+              <h4>Ringkasan Pesanan</h4>
+              <div id="checkout-items" class="checkout-items">
+                (Tidak ada item)
+              </div>
+            </div>
+
+            <!-- Form (inline, editable) -->
+            <form id="checkout-form" class="checkout-form" novalidate>
+              <div class="field" id="address-display-block">
+                <h4>Alamat Pengiriman</h4>
+                <div
+                  class="address-display"
+                  style="
+                    padding: 0.75rem;
+                    border: 1px solid #e6f4ea;
+                    border-radius: 6px;
+                    background: #f7fffb;
+                  "
+                >
+                  <div
+                    style="
+                      display: flex;
+                      align-items: center;
+                      gap: 0.5rem;
+                      margin-bottom: 0.25rem;
+                    "
+                  >
+                    <div class="location-icon">📍</div>
+                    <div class="font-bold" id="addr-display-name">
+                      Rumah • -
+                    </div>
+                  </div>
+                  <div
+                    id="addr-display-line"
+                    style="color: #333; line-height: 1.3"
+                  >
+                    Belum ada alamat
+                  </div>
+                  <div
+                    id="addr-display-phone"
+                    style="color: #666; margin-top: 0.25rem; font-size: 0.95rem"
+                  ></div>
+                </div>
+                <div class="mt-2">
+                  <button type="button" id="edit-address" class="btn">
+                    Ubah Alamat
+                  </button>
+                </div>
+              </div>
+
+              <div class="field two-column">
+                <div>
+                  <label for="cust-name">Nama lengkap</label>
+                  <input
+                    type="text"
+                    id="cust-name"
+                    required
+                    aria-required="true"
+                  />
+                  <div class="error" id="err-name" aria-live="polite"></div>
+                </div>
+                <div>
+                  <label for="cust-phone">Telepon</label>
+                  <input
+                    id="cust-phone"
+                    type="tel"
+                    required
+                    aria-required="true"
+                  />
+                  <div class="error" id="err-phone" aria-live="polite"></div>
+                </div>
+              </div>
+
+              <div class="field">
+                <label for="cust-address">Alamat lengkap</label>
+                <div
+                  class="address-search-container"
+                  style="display: flex; gap: 0.5rem"
+                >
+                  <input
+                    id="cust-address"
+                    type="text"
+                    placeholder="Ketik atau pilih lokasi di peta"
+                    required
+                    aria-required="true"
+                  />
+                </div>
+                <div id="map-container">
+                  <div id="map"></div>
+                </div>
+                <div class="error" id="err-address" aria-live="polite"></div>
+              </div>
+
+              <div class="payment-methods">
+                <div class="header">
+                  <h4>Metode Pembayaran</h4>
+                </div>
+
+                <div class="payment-options">
+                  <!-- Option 1: Bank Transfer -->
+                  <label class="payment-option">
+                    <input type="radio" name="payment" value="bank_transfer" checked>
+                    <span class="radio-custom"></span>
+                    <div class="option-content">
+                      <span class="option-title">Transfer Bank</span>
+                      <div class="store-logos">
+                        <span>BCA</span>
+                        <span>Mandiri</span>
+                        <span>BNI</span>
+                        <span>BSI</span>
+                      </div>
+                    </div>
+                  </label>
+
+                  <!-- Option 2: Store Payment -->
+                  <label class="payment-option">
+                    <input type="radio" name="payment" value="store">
+                    <span class="radio-custom"></span>
+                    <div class="option-content">
+                      <span class="option-title">Minimarket</span>
+                      <div class="store-logos">
+                        <span>Indomaret  ,  Alfamart</span>
+
+
+
+
+
+
+
+
+
+
+                      </div>
+                      <span class="option-desc">Bayar di kasir Indomaret atau Alfamart terdekat</span>
+                    </div>
+                  </label>
+
+                  <!-- Option 3: QRIS -->
+                  <label class="payment-option">
+                    <input type="radio" name="payment" value="qris">
+                    <span class="radio-custom"></span>
+                    <div class="option-content">
+                      <span class="option-title">QRIS</span>
+                      <span class="option-desc">Bayar dengan scan QR (OVO, GoPay, DANA, LinkAja, dll)</span>
+                    </div>
+                  </label>
+
+                  <!-- Option 4: ShopeePay -->
+                  <label class="payment-option">
+                    <input type="radio" name="payment" value="shopeepay">
+                    <span class="radio-custom"></span>
+                    <div class="option-content">
+                      <span class="option-title">ShopeePay</span>
+                      <span class="option-desc">Bayar dengan saldo ShopeePay</span>
+                      <div class="shopeepay-info">
+                        <span class="cashback-tag">Cashback 10%</span>
+                      </div>
+                    </div>
+                  </label>
+
+                </div>
+
+
+                  </label>
+
+                </div>
+
+                <!-- Gerai Offline Section -->
+                <div class="payment-section">
+                  <h5>Gerai Offline</h5>
+
+
+                </div>
+
+                <div class="order-summary">
+                  <h4>Cek ringkasan transaksimu, yuk</h4>
+                  <div class="summary-details">
+                    <div class="summary-line">
+                      <span>Total Harga (1 Barang)</span>
+                      <span class="amount" id="total-price">Rp0</span>
+                    </div>
+                    <div class="summary-line">
+                      <span>Total Ongkos Kirim</span>
+                      <span class="amount" id="shipping-cost">Rp0</span>
+                    </div>
+                    <div class="summary-line">
+                      <span>Total Asuransi Pengiriman</span>
+                      <span class="amount" id="insurance-cost">Rp0</span>
+                    </div>
+                    <div id="cashback-line" class="summary-line d-none">
+                      <span>Cashback (10%)</span>
+                      <span class="amount text-danger" id="cashback-amount">-Rp0</span>
+                    </div>
+                    <div class="summary-line total">
+                      <span>Total Tagihan</span>
+                      <span class="amount" id="total-amount">Rp0</span>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    class="pay-button"
+                    onclick="handlePayment()"
+                  >
+                    Bayar Sekarang
+                  </button>
+
+                  <div class="text-center mt-2 text-sm text-muted"
+                  >
+                    Dengan melanjutkan pembayaran, kamu menyetujui
+                    <a href="#" class="text-muted">S&K</a>
+                  </div>
+                </div>
+              </div>
+            </form>
+          </div>
+
+          <!-- Summary card removed -->
+        </div>
+
+        <!-- Payment detail panel (hidden until user clicks Pay) -->
+        <div
+          id="payment-detail-panel"
+          class="payment-detail-panel"
+          hidden
+        >
+          <h4>Detail Pembayaran</h4>
+          <div id="payment-detail-content">
+            <!-- Filled dynamically -->
+          </div>
+          <div class="mt-3">
+            <button id="confirm-pay" class="btn primary">
+              Konfirmasi &amp; Bayar
+            </button>
+            <button
+              id="cancel-pay"
+              type="button"
+              class="btn"
+              style="margin-left: 0.5rem"
+            >
+              Batal
+            </button>
+          </div>
+        </div>
+
+        <div id="checkout-complete" class="checkout-complete" hidden>
+          <div class="complete-inner" id="complete-inner">
+            <div class="complete-svg-container">
+              <svg
+                id="complete-svg"
+                class="complete-svg"
+                viewBox="0 0 120 120"
+                aria-hidden="true"
+              >
+                <circle
+                  class="check-circle"
+                  cx="60"
+                  cy="60"
+                  r="52"
+                  stroke="#4CAF50"
+                  stroke-width="4"
+                />
+                <g transform="translate(60 60) scale(3)">
+                  <g transform="translate(-12 -12)">
+                    <path
+                      class="check-check"
+                      d="M9 16.17L4.83 12 3.41 13.41 9 19 21 7 19.59 5.59z"
+                      fill="none"
+                      stroke="#fff"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                    <path
+                      class="check-fill"
+                      d="M9 16.17L4.83 12 3.41 13.41 9 19 21 7 19.59 5.59z"
+                      fill="#ffffff"
+                      opacity="0"
+                    />
+                  </g>
+                </g>
+              </svg>
+              <span class="visually-hidden" aria-live="polite"
+                >Pesanan selesai</span
+              >
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" aria-live="polite" aria-atomic="true"></div>
+
+    <footer class="site-footer">
+      <div class="container">
+        &copy; <span id="year"></span> TokoKu — Demo jual beli online
+      </div>
+    </footer>
+
+    <script>
+      // Inlined `baru.js` (guarded for pages that lack product grid / side-cart)
+      // Frontend JS: connects to backend API, adds validation and toast notifications
+      let products = [];
+      cart = {};
+      const AUTO_CLOSE_MS = 3500;
+
+      // DOM refs (may be null on checkout page for some elements)
+      const productGrid = document.getElementById("product-grid");
+      const cartBtn = document.getElementById("cart-btn");
+      const cartEl = document.getElementById("cart");
+      const closeCartBtn = document.getElementById("close-cart");
+      const cartItemsEl = document.getElementById("cart-items");
+      const cartCountEl = document.getElementById("cart-count");
+      const cartTotalEl = document.getElementById("cart-total");
+      const checkoutBtn = document.getElementById("checkout-btn");
+      const checkoutModal = document.getElementById("checkout-modal");
+      const closeCheckout = document.getElementById("close-checkout");
+      const checkoutForm = document.getElementById("checkout-form");
+      const checkoutMsg = document.getElementById("checkout-msg");
+      const searchInput = document.getElementById("search");
+      const toastEl = document.getElementById("toast");
+      const loginBtn = document.getElementById("login-btn");
+
+      const yearEl = document.getElementById("year");
+      if (yearEl) yearEl.textContent = new Date().getFullYear();
+
+      loadCart();
+      // fetchProducts will render products only if a product grid exists (guarded below)
+      fetchProducts();
+      renderCart();
+
+      // If this is checkout page, populate checkout on load
+      (function initCheckoutPage() {
+        const path = window.location.pathname || "";
+        const filename = path.split("/").pop() || "index.html";
+        if (filename === "checkout.html") {
+          try {
+            const u = JSON.parse(localStorage.getItem("userInfo") || "null");
+            if (u) {
+              if (document.getElementById("cust-name"))
+                document.getElementById("cust-name").value = u.name || "";
+              if (document.getElementById("cust-phone"))
+                document.getElementById("cust-phone").value = u.phone || "";
+            }
+          } catch (e) {
+            /* ignore */
+          }
+          populateCheckout();
+          ["cust-name", "cust-phone", "cust-address"].forEach((id) => {
+            document
+              .getElementById(id)
+              ?.addEventListener("input", updateAddressPreview);
+          });
+          document
+            .getElementById("edit-address")
+            ?.addEventListener("click", () => {
+              document.getElementById("cust-address").focus();
+            });
+        }
+      })();
+
+      // Handle Google Maps auth failure (invalid API key / restrict referrer)
+      try {
+        window.gm_authFailure = function () {
+          const mapEl = document.getElementById("map");
+          if (mapEl)
+            mapEl.innerHTML =
+              '<div class="maps-unavailable">Google Maps: otentikasi gagal. Periksa API key dan pengaturan referer di Google Cloud Console.</div>';
+          try {
+            showToast(
+              "Google Maps: otentikasi gagal — periksa API key/referer",
+              "error",
+              7000
+            );
+          } catch (e) {}
+        };
+      } catch (e) {}
+
+      function updateAuthUI() {
+        try {
+          const raw = localStorage.getItem("userInfo");
+          const u = raw ? JSON.parse(raw) : null;
+          if (!loginBtn) return;
+          if (u && u.name) {
+            const shortName = u.name.split(" ")[0];
+            loginBtn.textContent = `Halo, ${shortName}`;
+            loginBtn.classList.add("btn-profile");
+            loginBtn.onclick = () => {
+              const ok = confirm("Keluar dari akun?");
+              if (ok) {
+                localStorage.removeItem("userInfo");
+                showToast("Berhasil logout", "success");
+                updateAuthUI();
+              }
+            };
+          } else {
+            loginBtn.textContent = "Masuk";
+            loginBtn.classList.remove("btn-profile");
+            loginBtn.onclick = () => {
+              window.location.href = "login.html";
+            };
+          }
+        } catch (e) {
+          console.warn("Auth UI update failed", e);
+        }
+      }
+      updateAuthUI();
+
+      // Google Maps Places Autocomplete and geolocation helper
+      (function setupMapsAutocomplete() {
+        try {
+          const gmapsKey = document.body?.dataset?.gmapsApiKey?.trim();
+          const addrEl = document.getElementById("cust-address");
+          const locEl = document.getElementById("cust-location");
+          const latEl = document.getElementById("cust-lat");
+          const lngEl = document.getElementById("cust-lng");
+
+          // Click handler for the 'Deteksi Lokasi Saya' button
+          document
+            .getElementById("detect-location")
+            ?.addEventListener("click", () => {
+              if (!navigator.geolocation) {
+                showToast("Browser tidak mendukung geolocation", "error");
+                return;
+              }
+              showToast("Mendeteksi lokasi...", "info");
+              navigator.geolocation.getCurrentPosition(
+                async (pos) => {
+                  const lat = pos.coords.latitude;
+                  const lng = pos.coords.longitude;
+                  if (latEl) latEl.value = String(lat);
+                  if (lngEl) lngEl.value = String(lng);
+                  if (locEl) locEl.value = `${lat},${lng}`;
+                  // If Google Maps Geocoder is available, reverse-geocode to get a readable address
+                  if (
+                    window.google &&
+                    google.maps &&
+                    google.maps.Geocoder &&
+                    addrEl
+                  ) {
+                    try {
+                      const geocoder = new google.maps.Geocoder();
+                      geocoder.geocode(
+                        { location: { lat, lng } },
+                        (results, status) => {
+                          if (status === "OK" && results && results[0]) {
+                            addrEl.value =
+                              results[0].formatted_address || addrEl.value;
+                            updateAddressPreview();
+                            validateCheckoutForm();
+                            showToast("Lokasi terdeteksi", "success");
+                          } else {
+                            // Fallback: keep lat/lng string
+                            showToast(
+                              "Lokasi terdeteksi (koordinat)",
+                              "warning"
+                            );
+                          }
+                        }
+                      );
+                    } catch (e) {
+                      showToast("Gagal melakukan reverse-geocode", "warning");
+                    }
+                  } else {
+                    showToast("Lokasi terdeteksi (koordinat)", "warning");
+                  }
+                },
+                (err) => {
+                  showToast(
+                    "Gagal mendapatkan lokasi: " + (err.message || err.code),
+                    "error"
+                  );
+                },
+                { enableHighAccuracy: true, timeout: 10000 }
+              );
+            });
+
+          // If a Google Maps API key is provided via body[data-gmaps-api-key], load Places and wire Autocomplete
+          if (gmapsKey) {
+            // expose init callback globally for the Maps script loader
+            window.__initGmapsAutocomplete = function () {
+              try {
+                if (!addrEl) return;
+                const ac = new google.maps.places.Autocomplete(addrEl, {
+                  types: ["address"],
+                });
+                ac.setFields(["formatted_address", "geometry", "name"]);
+                ac.addListener("place_changed", () => {
+                  const place = ac.getPlace();
+                  if (place.geometry && place.geometry.location) {
+                    const lat = place.geometry.location.lat();
+                    const lng = place.geometry.location.lng();
+                    if (latEl) latEl.value = String(lat);
+                    if (lngEl) lngEl.value = String(lng);
+                    if (locEl) locEl.value = `${lat},${lng}`;
+                  }
+                  if (place.formatted_address)
+                    addrEl.value = place.formatted_address;
+                  updateAddressPreview();
+                  validateCheckoutForm();
+                });
+              } catch (e) {
+                console.warn("initGmapsAutocomplete error", e);
+              }
+            };
+            // Dynamically add Maps script with callback
+            try {
+              const s = document.createElement("script");
+              s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(
+                gmapsKey
+              )}&libraries=places&callback=__initGmapsAutocomplete`;
+              s.async = true;
+              s.defer = true;
+              document.head.appendChild(s);
+            } catch (e) {
+              console.warn("Failed to load Google Maps script", e);
+            }
+          } else {
+            // no API key: still allow geolocation fallback (button) and basic address typing
+            console.log(
+              "Google Maps API key not set. Place autocomplete disabled."
+            );
+          }
+        } catch (e) {
+          console.warn("setupMapsAutocomplete error", e);
+        }
+      })();
+
+      (function requireLoginRedirect() {
+        try {
+          const path = window.location.pathname || "";
+          const filename = path.split("/").pop() || "index.html";
+          const isIndex =
+            filename === "" || filename === "index.html" || filename === "/";
+          if (isIndex) {
+            const u = JSON.parse(localStorage.getItem("userInfo") || "null");
+            if (!u) {
+              const returnTo = encodeURIComponent(
+                window.location.pathname + window.location.search
+              );
+              window.location.href = `login.html?returnTo=${returnTo}`;
+            }
+          }
+        } catch (e) {
+          console.warn("requireLoginRedirect error", e);
+        }
+      })();
+
+      // Events (guarded when target elements are absent)
+      if (cartBtn && cartEl)
+        cartBtn.addEventListener("click", () => cartEl.classList.add("open"));
+      if (closeCartBtn && cartEl)
+        closeCartBtn.addEventListener("click", () =>
+          cartEl.classList.remove("open")
+        );
+      if (checkoutBtn)
+        checkoutBtn.addEventListener("click", () => {
+          if (Object.keys(cart).length === 0) {
+            showToast("Keranjang kosong", "error");
+            return;
+          }
+          window.location.href = "checkout.html";
+        });
+
+      if (closeCheckout)
+        closeCheckout.addEventListener("click", () => {
+          checkoutModal?.classList.remove("open");
+          checkoutModal?.setAttribute("aria-hidden", "true");
+          clearCheckoutErrors();
+          document.body.classList.remove("modal-open");
+        });
+
+      // cancel button in modal
+      document.addEventListener("click", (e) => {
+        if (e.target && e.target.id === "cancel-checkout") {
+          checkoutModal?.classList.remove("open");
+          checkoutModal?.setAttribute("aria-hidden", "true");
+          clearCheckoutErrors();
+          document.body.classList.remove("modal-open");
+        }
+      });
+      if (searchInput)
+        searchInput.addEventListener("input", (e) => {
+          const q = e.target.value.toLowerCase().trim();
+          const filtered = products.filter(
+            (p) =>
+              p.name.toLowerCase().includes(q) ||
+              p.desc.toLowerCase().includes(q)
+          );
+          renderProducts(filtered);
+        });
+
+      document.getElementById("open-maps")?.addEventListener("click", () => {
+        const loc = document.getElementById("cust-location");
+        const addr = document.getElementById("cust-address");
+        const q = encodeURIComponent(
+          (loc?.value || addr?.value || "Indonesia").trim()
+        );
+        window.open(
+          `https://www.google.com/maps/search/?api=1&query=${q}`,
+          "_blank"
+        );
+      });
+
+      document.querySelectorAll('input[name="payment"]')?.forEach((r) =>
+        r.addEventListener("change", (e) => {
+          const val = e.target.value;
+          const bankSel = document.getElementById("bank-select");
+          if (bankSel)
+            bankSel.style.display = val === "bank" ? "block" : "none";
+        })
+      );
+
+      if (checkoutForm)
+        checkoutForm.addEventListener("submit", async (e) => {
+          e.preventDefault();
+          clearCheckoutErrors();
+          if (Object.keys(cart).length === 0) {
+            showToast("Keranjang kosong", "error");
+            return;
+          }
+
+          const nameEl = document.getElementById("cust-name");
+          const addrEl = document.getElementById("cust-address");
+          const phoneEl = document.getElementById("cust-phone");
+          const name = nameEl.value.trim();
+          const address = addrEl.value.trim();
+          const phone = phoneEl.value.trim();
+
+          let hasError = false;
+          if (name.length < 3) {
+            document.getElementById("err-name").textContent =
+              "Nama harus minimal 3 karakter";
+            hasError = true;
+          }
+          if (address.length < 5) {
+            document.getElementById("err-address").textContent =
+              "Alamat terlalu singkat";
+            hasError = true;
+          }
+          if (!/^\+?[0-9 \-]{6,15}$/.test(phone)) {
+            document.getElementById("err-phone").textContent =
+              "Nomor telepon tidak valid";
+            hasError = true;
+          }
+          if (hasError) return;
+
+          const payload = {
+            name,
+            address,
+            phone,
+            location: document.getElementById("cust-location")?.value || "",
+            payment:
+              (document.querySelector('input[name="payment"]:checked') || {})
+                .value || "",
+            bank: document.getElementById("bank")?.value || null,
+            items: Object.values(cart).map((i) => ({
+              productId: i.product.id,
+              qty: i.qty,
+              price: i.product.price,
+            })),
+            total: calcTotal(),
+          };
+
+          // Instead of sending immediately, show payment details / VA etc.
+          showPaymentDetails(payload);
+        });
+
+      function populateCheckout() {
+        const itemsEl = document.getElementById("checkout-items");
+        const subtotalEl = document.getElementById("checkout-subtotal");
+        if (itemsEl) itemsEl.innerHTML = "";
+        const ids = Object.keys(cart);
+        if (ids.length === 0) {
+          if (itemsEl)
+            itemsEl.innerHTML = '<div class="small">Keranjang kosong</div>';
+          if (subtotalEl) subtotalEl.textContent = formatCurrency(0);
+          const submitBtn = document.getElementById("submit-order");
+          if (submitBtn) submitBtn.disabled = true;
+          return;
+        }
+
+        ids.forEach((id) => {
+          const it = cart[id];
+          const div = document.createElement("div");
+          div.className = "item";
+          div.dataset.id = id;
+          div.innerHTML = `
+        <div class="name">${it.product.name}</div>
+        <div class="qty-controls">
+          <button class="qty-dec" data-id="${id}" aria-label="Kurangi">-</button>
+          <div class="qty-value">${it.qty}</div>
+          <button class="qty-inc" data-id="${id}" aria-label="Tambahkan">+</button>
+        </div>
+        <div class="line-price">Rp ${formatCurrency(
+          it.product.price * it.qty
+        )}</div>
+      `;
+          itemsEl?.appendChild(div);
+        });
+
+        itemsEl.onclick = function (e) {
+          const btn = e.target.closest("button");
+          if (!btn) return;
+          const id = btn.dataset.id;
+          if (!id) return;
+          if (btn.classList.contains("qty-inc")) adjustCartQty(id, 1);
+          else if (btn.classList.contains("qty-dec")) adjustCartQty(id, -1);
+        };
+
+        if (subtotalEl) subtotalEl.textContent = formatCurrency(calcTotal());
+        const name = document.getElementById("cust-name")?.value || "-";
+        const phone = document.getElementById("cust-phone")?.value || "-";
+        const addrLine =
+          document.getElementById("cust-address")?.value || "(Belum diisi)";
+        const addrNameEl = document.getElementById("addr-name");
+        const addrPhoneEl = document.getElementById("addr-phone");
+        const addrLineEl = document.getElementById("addr-line");
+        if (addrNameEl) addrNameEl.textContent = name;
+        if (addrPhoneEl) addrPhoneEl.textContent = phone;
+        if (addrLineEl) addrLineEl.textContent = addrLine;
+
+        const totalEl = document.getElementById("checkout-total");
+        const shippingEl = document.getElementById("checkout-shipping");
+        if (shippingEl) shippingEl.textContent = "Rp 0";
+        if (totalEl) totalEl.textContent = formatCurrency(calcTotal());
+
+        const mobileTotal = document.getElementById("mobile-total");
+        const mobileSummary = document.getElementById("mobile-summary");
+        if (mobileTotal) mobileTotal.textContent = formatCurrency(calcTotal());
+        if (mobileSummary) {
+          if (window.innerWidth <= 780) mobileSummary.style.display = "flex";
+          else mobileSummary.style.display = "none";
+        }
+
+        validateCheckoutForm();
+      }
+
+      function adjustCartQty(id, delta) {
+        if (!cart[id]) return;
+        cart[id].qty = (cart[id].qty || 0) + delta;
+        if (cart[id].qty <= 0) delete cart[id];
+        saveCart();
+        renderCart();
+        populateCheckout();
+      }
+
+      function showCheckoutComplete({ id, offline = false, order }) {
+        // Create and show the success modal
+        const paymentModal = document.createElement("div");
+        paymentModal.className = "payment-modal";
+        paymentModal.innerHTML = `
+            <div class="modal-content payment-success">
+              <div class="success-checkmark">
+                <svg viewBox="0 0 24 24">
+                  <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/>
+                </svg>
+              </div>
+              <h3>Pembayaran Berhasil!</h3>
+              <p>ID Pesanan: ${id}</p>
+              <p>Total: Rp ${formatCurrency(order.total)}</p>
+              ${
+                offline
+                  ? `<p style="color:#856404;background:#fff3cd;padding:8px;border-radius:4px;margin:1rem 0">
+                     <strong>Mode Offline:</strong> pesanan disimpan di penyimpanan lokal browser.</p>`
+                  : ""
+              }
+              <button class="btn primary" onclick="window.location.href='/'">
+                Kembali ke Beranda
+              </button>
+            </div>
+          `;
+        document.body.appendChild(paymentModal);
+
+        // Fade in animation
+        requestAnimationFrame(() => {
+          paymentModal.classList.add("fade-in");
+        });
+
+        // Clean up function
+        const removeModal = () => {
+          paymentModal.classList.add("fade-out");
+          setTimeout(() => {
+            paymentModal.remove();
+            // Clean up the form
+            const formEl = document.getElementById("checkout-form");
+            const summaryEl = document.querySelector(".checkout-summary");
+            const submitBtn = document.getElementById("submit-order");
+
+            if (formEl) formEl.style.display = "";
+            if (summaryEl) summaryEl.style.opacity = "";
+            if (submitBtn) submitBtn.disabled = false;
+
+            try {
+              document.body.classList.remove("modal-open");
+            } catch (e) {}
+          }, 300);
+        };
+
+        // Remove modal on click outside
+        paymentModal.addEventListener("click", (e) => {
+          if (e.target === paymentModal) {
+            removeModal();
+          }
+        });
+
+        // Auto remove after 5 seconds
+        setTimeout(removeModal, 5000);
+
+        // Hide cart if open
+        try {
+          if (cartEl && cartEl.classList.contains("open"))
+            cartEl.classList.remove("open");
+        } catch (e) {}
+      }
+
+      function getProductNameById(id) {
+        const p = products.find((x) => x.id === id);
+        return p ? p.name : null;
+      }
+
+      function clearCheckoutErrors() {
+        ["err-name", "err-address", "err-phone"].forEach((id) => {
+          const el = document.getElementById(id);
+          if (el) el.textContent = "";
+        });
+      }
+
+      function updateAddressPreview() {
+        const name = document.getElementById("cust-name")?.value || "-";
+        const phone = document.getElementById("cust-phone")?.value || "-";
+        const addrLine =
+          document.getElementById("cust-address")?.value || "(Belum diisi)";
+        const addrNameEl = document.getElementById("addr-name");
+        const addrPhoneEl = document.getElementById("addr-phone");
+        const addrLineEl = document.getElementById("addr-line");
+        if (addrNameEl) addrNameEl.textContent = name;
+        if (addrPhoneEl) addrPhoneEl.textContent = phone;
+        if (addrLineEl) addrLineEl.textContent = addrLine;
+      }
+
+      function validateCheckoutForm() {
+        const name = (document.getElementById("cust-name")?.value || "").trim();
+        const address = (
+          document.getElementById("cust-address")?.value || ""
+        ).trim();
+        const phone = (
+          document.getElementById("cust-phone")?.value || ""
+        ).trim();
+        const payment =
+          (document.querySelector('input[name="payment"]:checked') || {})
+            .value || "";
+        const payBtn = document.getElementById("submit-order");
+        let ok = true;
+        if (name.length < 3) ok = false;
+        if (address.length < 5) ok = false;
+        if (!/^\+?[0-9 \-]{6,15}$/.test(phone)) ok = false;
+        if (!payment) ok = false;
+        if (payBtn) payBtn.disabled = !ok;
+        return ok;
+      }
+
+      ["cust-name", "cust-address", "cust-phone"].forEach((id) => {
+        document
+          .getElementById(id)
+          ?.addEventListener("input", () => validateCheckoutForm());
+      });
+
+      // Handle payment method selection
+      document.querySelectorAll('input[name="payment"]').forEach((radio) => {
+        radio.addEventListener("change", function() {
+          updatePaymentDetails();
+        });
+      });
+
+      function updatePaymentDetails() {
+        const subtotal = calcTotal();
+        // calculate shipping dynamically based on address text
+        const addrText = (
+          document.getElementById("cust-address")?.value || ""
+        ).trim();
+        const shipping = calculateShipping(addrText);
+        const insurance = Math.ceil(subtotal * 0.003); // 0.3% insurance
+
+        // Check if ShopeePay is selected for cashback
+        const selectedPayment = document.querySelector('input[name="payment"]:checked');
+        const isShopeePaySelected = selectedPayment && selectedPayment.value === 'shopeepay';
+        const cashbackAmount = isShopeePaySelected ? Math.ceil(subtotal * 0.1) : 0; // 10% cashback
+        
+        // Calculate final total with cashback deduction
+        const total = subtotal + shipping + insurance - cashbackAmount;
+
+        // Update summary elements
+        const elTotalPrice = document.getElementById("total-price");
+        const elShipping = document.getElementById("shipping-cost");
+        const elInsurance = document.getElementById("insurance-cost");
+        const elCashbackLine = document.getElementById("cashback-line");
+        const elCashbackAmount = document.getElementById("cashback-amount");
+        const elTotalAmount = document.getElementById("total-amount");
+
+        if (elTotalPrice)
+          elTotalPrice.textContent = "Rp" + formatCurrency(subtotal);
+        if (elShipping)
+          elShipping.textContent = "Rp" + formatCurrency(shipping);
+        if (elInsurance)
+          elInsurance.textContent = "Rp" + formatCurrency(insurance);
+        
+        // Handle cashback display
+        if (elCashbackLine) {
+          elCashbackLine.style.display = isShopeePaySelected ? 'flex' : 'none';
+        }
+        if (elCashbackAmount && isShopeePaySelected) {
+          elCashbackAmount.textContent = "-Rp" + formatCurrency(cashbackAmount);
+        }
+        
+        if (elTotalAmount)
+          elTotalAmount.textContent = "Rp" + formatCurrency(total);
+
+        // Populate order items in the main checkout items container (if present)
+        const checkoutItemsContainer =
+          document.getElementById("checkout-items");
+        if (checkoutItemsContainer) {
+          checkoutItemsContainer.innerHTML = "";
+          Object.values(cart).forEach((item) => {
+            const itemElement = document.createElement("div");
+            itemElement.className = "order-item";
+            itemElement.innerHTML = `
+                <div class="item-name">${item.product.name}</div>
+                <div class="item-quantity">
+                  <button class="btn" data-action="dec" data-id="${
+                    item.product.id
+                  }">-</button>
+                  <span>${item.qty}</span>
+                  <button class="btn" data-action="inc" data-id="${
+                    item.product.id
+                  }">+</button>
+                </div>
+                <div class="item-price">Rp ${formatCurrency(
+                  item.product.price * item.qty
+                )}</div>
+              `;
+            checkoutItemsContainer.appendChild(itemElement);
+          });
+
+          // Wire quantity buttons inside the checkout items list
+          checkoutItemsContainer.querySelectorAll("button").forEach((b) =>
+            b.addEventListener("click", (e) => {
+              const id = e.currentTarget.dataset.id;
+              const act = e.currentTarget.dataset.action;
+              if (act === "inc") {
+                cart[id].qty += 1;
+              } else if (act === "dec") {
+                cart[id].qty -= 1;
+                if (cart[id].qty <= 0) delete cart[id];
+              }
+              saveCart();
+              renderCart();
+              updatePaymentDetails();
+            })
+          );
+        }
+      }
+
+      // Simple zone-based shipping calculation using address keywords
+      function calculateShipping(address) {
+        if (!address) return 20000; // default
+        const a = address.toLowerCase();
+        if (a.includes("semarang")) return 13000;
+        if (
+          a.includes("jakarta") ||
+          a.includes("jakarta selatan") ||
+          a.includes("jakarta pusat")
+        )
+          return 15000;
+        if (a.includes("surabaya")) return 14000;
+        if (a.includes("bandung")) return 14000;
+        if (
+          a.includes("yogyakarta") ||
+          a.includes("yogya") ||
+          a.includes("sleman")
+        )
+          return 12000;
+        // fallback
+        return 20000;
+      }
+
+      // Update the address-display block from form inputs
+      function handlePayment() {
+        // Validate form first
+        const name = (document.getElementById("cust-name")?.value || "").trim();
+        const address = (
+          document.getElementById("cust-address")?.value || ""
+        ).trim();
+        const phone = (
+          document.getElementById("cust-phone")?.value || ""
+        ).trim();
+        const payment = (
+          document.querySelector('input[name="payment"]:checked') || {}
+        ).value;
+
+        if (!name || !address || !phone || !payment) {
+          showToast("Mohon lengkapi semua data", "error");
+          return;
+        }
+
+        // Prepare payment data
+        const orderData = {
+          name,
+          address,
+          phone,
+          payment,
+          items: Object.values(cart).map((i) => ({
+            productId: i.product.id,
+            qty: i.qty,
+            price: i.product.price,
+          })),
+          total: calcTotal(),
+        };
+
+        // Show payment details
+        showPaymentDetails(orderData);
+      }
+
+      function updateAddressDisplay() {
+        const name = (document.getElementById("cust-name")?.value || "").trim();
+        const addr = (
+          document.getElementById("cust-address")?.value || ""
+        ).trim();
+        const phone = (
+          document.getElementById("cust-phone")?.value || ""
+        ).trim();
+        const elName = document.getElementById("addr-display-name");
+        const elLine = document.getElementById("addr-display-line");
+        const elPhone = document.getElementById("addr-display-phone");
+        if (elName) elName.textContent = name ? "Rumah • " + name : "Rumah • -";
+        if (elLine) elLine.textContent = addr || "Belum ada alamat";
+        if (elPhone) elPhone.textContent = phone || "";
+      }
+
+      // wire edit-address button to focus the address input
+      document.getElementById("edit-address")?.addEventListener("click", () => {
+        const addrInput = document.getElementById("cust-address");
+        if (addrInput) {
+          addrInput.focus();
+          // Optionally open map panel or similar
+        }
+      });
+
+      // Keep address display in sync when inputs change
+      ["cust-name", "cust-address", "cust-phone"].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el)
+          el.addEventListener("input", () => {
+            updateAddressDisplay();
+          });
+      });
+
+      // call once to sync initial values
+      try {
+        updateAddressDisplay();
+      } catch (e) {}
+
+      // Helper: create a fake VA number for demonstration
+      function generateVANumber(bank) {
+        const prefixes = {
+          bca: "880",
+          mandiri: "888",
+          bni: "009",
+          bsi: "451",
+        };
+        const prefix = prefixes[bank] || "700";
+        // Use timestamp to create pseudo-unique number
+        const suffix = String(Date.now()).slice(-8);
+        return prefix + suffix;
+      }
+
+      // Show payment detail panel (VA / instructions) before finalizing order
+      function createConfetti() {
+        const colors = ["#00a65a", "#4CAF50", "#8BC34A", "#CDDC39"];
+        for (let i = 0; i < 50; i++) {
+          const confetti = document.createElement("div");
+          confetti.className = "confetti-piece";
+          confetti.style.left = Math.random() * 100 + "vw";
+          confetti.style.background =
+            colors[Math.floor(Math.random() * colors.length)];
+          confetti.style.animation = `confetti ${
+            1 + Math.random() * 2
+          }s ease-out forwards`;
+          confetti.style.transform = `rotate(${Math.random() * 360}deg)`;
+          document.body.appendChild(confetti);
+          setTimeout(() => confetti.remove(), 3000);
+        }
+      }
+
+      // Create a simple QR-like image (mock) and return a data URL.
+      // This avoids adding external libraries; for production replace with a real QR generator.
+      // Create a QR data URL using the qrcode library. Returns a Promise<string>.
+      // The payload follows a simple QRIS-like placeholder format. Replace with official QRIS payload when available.
+      function generatePaymentQR(amount, method) {
+        // Generate a unique invoice number
+        const merchantId = 'STORE12345';
+        const invoice = 'INV' + String(Date.now()).slice(-10);
+        
+        // Create QRIS/payment payload
+        const payload = `QRIS|MERCHANT:${merchantId}|INV:${invoice}|AMT:${amount}|METHOD:${method}`;
+        
+        // Create QR code element and return promise
+        return new Promise((resolve) => {
+          // Create a temporary container
+          const container = document.createElement('div');
+          
+          // Create new QR code instance
+          new QRCode(container, {
+            text: payload,
+            width: 256,
+            height: 256,
+            colorDark: "#000000",
+            colorLight: "#ffffff",
+            correctLevel: QRCode.CorrectLevel.H
+          });
+          
+          // Get the generated QR code as image
+          const qrImage = container.querySelector('img');
+          if (qrImage && qrImage.src) {
+            resolve(qrImage.src);
+          } else {
+            // Fallback if image generation fails
+            const canvas = container.querySelector('canvas');
+            if (canvas) {
+              resolve(canvas.toDataURL('image/png'));
+            } else {
+              // Last resort fallback
+              const fallbackCanvas = document.createElement('canvas');
+              const ctx = fallbackCanvas.getContext('2d');
+              fallbackCanvas.width = 256;
+              fallbackCanvas.height = 256;
+              
+              // Draw fallback QR content
+              ctx.fillStyle = '#fff';
+              ctx.fillRect(0, 0, 256, 256);
+              ctx.fillStyle = '#000';
+              ctx.font = '14px Arial';
+              ctx.fillText(`STORE: ${merchantId}`, 10, 30);
+              ctx.fillText(`INV: ${invoice}`, 10, 50);
+              ctx.fillText(`Rp${formatCurrency(amount)}`, 10, 70);
+              
+              resolve(fallbackCanvas.toDataURL('image/png'));
+            }
+          }
+        });
+      }
+
+  async function showPaymentDetails(payload) {
+        const submitBtn = document.getElementById("submit-order");
+        if (submitBtn) submitBtn.disabled = true;
+
+  const method = payload.payment || "";
+  const bank = payload.bank || null;
+
+  // Compute totals for display inside the payment modal
+  const subtotal = calcTotal();
+  const addrText = (document.getElementById("cust-address")?.value || "").trim();
+  const shipping = calculateShipping(addrText);
+  const insurance = Math.ceil(subtotal * 0.003);
+  const isShopee = method === 'shopeepay' || payload.payment === 'shopeepay';
+  const cashback = isShopee ? Math.ceil(subtotal * 0.1) : 0; // 10% cashback on subtotal
+  const finalTotal = subtotal + shipping + insurance - cashback;
+
+        // Create modal
+        const modal = document.createElement("div");
+        modal.className = "payment-modal";
+
+        // Generate payment instructions HTML
+        let instructionsHtml = "";
+        if (method === "shopeepay") {
+          // use a generated mock-QR image for the payment modal
+          const qrDataUrl = await generatePaymentQR(finalTotal || 0, 'shopeepay');
+          instructionsHtml = `
+              <p>Silakan buka aplikasi Shopee dan ikuti langkah berikut:</p>
+              <ol style="margin-left:1.5rem;margin-top:0.5rem">
+                <li>Tap menu ShopeePay</li>
+                <li>Pilih 'Scan QR'</li>
+                <li>Scan kode QR di bawah ini</li>
+              </ol>
+              <div class="qr-container" style="margin:1rem 0;text-align:center;padding:0.5rem;background:#fff;border-radius:8px">
+                <img src="${qrDataUrl}" alt="ShopeePay QR Code" style="max-width:260px;width:100%;height:auto;border-radius:6px;box-shadow:0 1px 3px rgba(0,0,0,0.08)" />
+              </div>
+              <p class="amount-text" style="text-align:center;font-size:1.1rem;margin:1rem 0">
+                <strong>Total Pembayaran:</strong><br>
+                <span style="color:#ee4d2d;font-size:1.3rem;font-weight:600">Rp ${formatCurrency(finalTotal)}</span>
+              </p>
+              <p class="note" style="color:#ee4d2d;font-size:0.9rem">
+                <strong>Bonus Cashback 10%</strong> akan otomatis masuk ke ShopeePay-mu dalam 24 jam
+              </p>
+            `;
+          } else if (method === "qris") {
+            // Generic QRIS payment flow — show scannable QR and instructions similar to ShopeePay
+            const qrDataUrl = await generatePaymentQR(finalTotal || 0, 'qris');
+            instructionsHtml = `
+                <p>Silakan buka aplikasi pembayaran (bank atau e-wallet) dan ikuti langkah berikut:</p>
+                <ol style="margin-left:1.5rem;margin-top:0.5rem">
+                  <li>Buka aplikasi pembayaran (contoh: Mobile banking, Gopay, OVO, DANA, ShopeePay)</li>
+                  <li>Pilih menu <em>Scan QR</em> atau fitur bayar dengan QR</li>
+                  <li>Scan kode QR di bawah ini</li>
+                </ol>
+                <div class="qr-container" style="margin:1rem 0;text-align:center;padding:0.5rem;background:#fff;border-radius:8px">
+                  <img src="${qrDataUrl}" alt="QRIS Code" style="max-width:260px;width:100%;height:auto;border-radius:6px;box-shadow:0 1px 3px rgba(0,0,0,0.08)" />
+                </div>
+                <p class="amount-text" style="text-align:center;font-size:1.1rem;margin:1rem 0">
+                  <strong>Total Pembayaran:</strong><br>
+                  <span style="color:#ee4d2d;font-size:1.3rem;font-weight:600">Rp ${formatCurrency(finalTotal)}</span>
+                </p>
+                <p class="small" style="color:#666;text-align:center">Tampilkan kode QR ini ke kasir atau scan menggunakan aplikasi pembayaran Anda. Simpan bukti pembayaran jika diperlukan.</p>
+              `;
+        } else if (method === "store") {
+          const paycode = generateVANumber("retail");
+          instructionsHtml = `
+              <p>Kode Pembayaran:</p>
+              <div class="va-number">${paycode}</div>
+              <p>Instruksi Pembayaran:</p>
+              <ol style="margin-left:1.5rem;margin-top:0.5rem">
+                <li>Tunjukkan kode pembayaran di atas ke kasir Indomaret/Alfamart</li>
+                <li>Lakukan pembayaran sebesar <strong>Rp ${formatCurrency(finalTotal)}</strong></li>
+                <li>Simpan struk pembayaran sebagai bukti transaksi</li>
+              </ol>
+              <p class="small" style="color:#666">Pembayaran akan dikonfirmasi otomatis dalam 5 menit</p>
+            `;
+        } else if (
+          method === "bca" ||
+          method === "mandiri" ||
+          method === "bni" ||
+          method === "bsi"
+        ) {
+          const va = generateVANumber(method);
+          instructionsHtml = `
+              <p>Silakan lakukan transfer ke Virtual Account berikut:</p>
+              <div class="va-number">${va}</div>
+              <p>Instruksi: Transfer nominal <strong>Rp ${formatCurrency(
+                finalTotal
+              )}</strong> ke nomor VA di atas.</p>
+              <p class="small" style="color:#666">Simpan bukti transfer untuk referensi.</p>
+            `;
+        } else if (
+          method === "gopay" ||
+          method === "ovo" ||
+          method === "dana"
+        ) {
+          instructionsHtml = `
+              <p>Total Pembayaran: <strong>Rp ${formatCurrency(
+                finalTotal
+              )}</strong></p>
+              <p>Ikuti instruksi pembayaran di aplikasi ${method.toUpperCase()} Anda:</p>
+              <ol style="margin-left:1.5rem;margin-top:0.5rem">
+                <li>Buka aplikasi ${method.toUpperCase()}</li>
+                <li>Pilih Pay/Bayar</li>
+                <li>Scan QR Code atau masukkan nominal</li>
+                <li>Konfirmasi pembayaran</li>
+              </ol>
+            `;
+        } else if (method === "bank") {
+          const chosen = bank || "bca";
+          const va = generateVANumber(chosen);
+          instructionsHtml = `
+              <p>Transfer ke Virtual Account ${chosen.toUpperCase()}:</p>
+              <div class="va-number">${va}</div>
+              <p>Nominal: <strong>Rp ${formatCurrency(
+                finalTotal
+              )}</strong></p>
+            `;
+        }
+
+  // Prepare payload for confirmation (ensure final total is sent)
+  const payloadForConfirm = Object.assign({}, payload, { total: finalTotal });
+
+  // Construct full modal HTML
+        modal.innerHTML = `
+            <div class="modal-content">
+              <button class="close-btn" onclick="this.closest('.payment-modal').remove();document.getElementById('submit-order').disabled=false;">&times;</button>
+              <h3>Detail Pembayaran</h3>
+              <div class="modal-body">
+                <p><strong>Metode:</strong> ${method.toUpperCase()} ${
+          bank ? `(${bank.toUpperCase()})` : ""
+        }</p>
+                ${instructionsHtml}
+                <div class="modal-actions" style="margin-top:1.5rem">
+                  <button class="btn primary" onclick="handleConfirmPayment(${JSON.stringify(
+                    payloadForConfirm
+                  ).replace(/"/g, "&quot;")})">
+                    Konfirmasi Pembayaran
+                  </button>
+                  <button class="btn" onclick="this.closest('.payment-modal').remove();document.getElementById('submit-order').disabled=false;" style="margin-left:0.5rem">
+                    Batal
+                  </button>
+                </div>
+              </div>
+            </div>
+          `;
+
+        document.body.appendChild(modal);
+
+        // Add fade-in class after a small delay for animation
+        setTimeout(() => modal.classList.add("fade-in"), 50);
+      }
+
+      async function handleConfirmPayment(payload) {
+        const confirmBtn = document.querySelector(
+          ".payment-modal .btn.primary"
+        );
+        if (confirmBtn) confirmBtn.disabled = true;
+
+        try {
+          const res = await fetch("/api/orders", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+
+          if (!res.ok) throw new Error("Gagal menyimpan order");
+
+          const data = await res.json();
+
+          // Remove payment modal
+          document.querySelector(".payment-modal")?.remove();
+
+          // Show success modal
+          const successModal = document.createElement("div");
+          successModal.className = "payment-modal";
+          successModal.innerHTML = `
+              <div class="modal-content payment-success">
+                <div class="success-checkmark">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/>
+                  </svg>
+                </div>
+                <h3>Pembayaran Berhasil!</h3>
+                <p>Pesanan Anda telah dikonfirmasi.<br>ID Pesanan: ${data.id}</p>
+                <p class="small" style="color: #666">Status: Terkirim ke server</p>
+                <a href="index.html" class="btn primary" style="margin-top: 1rem">Selesai</a>
+              </div>
+            `;
+
+          document.body.appendChild(successModal);
+          setTimeout(() => successModal.classList.add("fade-in"), 50);
+          createConfetti();
+
+          // Clear cart and reset form
+          cart = {};
+          saveCart();
+          renderCart();
+          document.getElementById("checkout-form")?.reset();
+          showToast("Pesanan berhasil! ID: " + data.id, "success");
+        } catch (err) {
+          // Offline fallback
+          const orders = JSON.parse(localStorage.getItem("orders") || "[]");
+          const order = { id: Date.now(), ...payload };
+          orders.push(order);
+          localStorage.setItem("orders", JSON.stringify(orders));
+
+          // Remove payment modal
+          document.querySelector(".payment-modal")?.remove();
+
+          // Show offline success modal
+          const successModal = document.createElement("div");
+          successModal.className = "payment-modal";
+          successModal.innerHTML = `
+              <div class="modal-content payment-success">
+                <div class="success-checkmark">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/>
+                  </svg>
+                </div>
+                <h3>Pembayaran Berhasil!</h3>
+                <p>Pesanan Anda telah dikonfirmasi.<br>ID Pesanan: ${order.id}</p>
+                <p class="small" style="color: #666">Status: Disimpan lokal</p>
+                <a href="index.html" class="btn primary" style="margin-top: 1rem">Kembali ke Toko</a>
+              </div>
+            `;
+
+          document.body.appendChild(successModal);
+          setTimeout(() => successModal.classList.add("fade-in"), 50);
+          createConfetti();
+
+          // Clear cart and reset form
+          cart = {};
+          saveCart();
+          renderCart();
+          document.getElementById("checkout-form")?.reset();
+          showToast("Pesanan disimpan secara lokal", "warning");
+        } finally {
+          // Re-enable submit button
+          if (confirmBtn) confirmBtn.disabled = false;
+          document.getElementById("submit-order")?.removeAttribute("disabled");
+        }
+      }
+
+      document
+        .getElementById("submit-order")
+        ?.addEventListener("click", (e) => {
+          if (checkoutForm) {
+            if (typeof checkoutForm.requestSubmit === "function")
+              checkoutForm.requestSubmit();
+            else
+              checkoutForm.dispatchEvent(
+                new Event("submit", { bubbles: true, cancelable: true })
+              );
+          }
+        });
+
+      document.getElementById("mobile-pay")?.addEventListener("click", () => {
+        const mainPay = document.getElementById("submit-order");
+        if (mainPay && !mainPay.disabled) mainPay.click();
+      });
+
+      async function fetchProducts() {
+        try {
+          const res = await fetch("/api/products");
+          if (!res.ok) throw new Error("Gagal mengambil produk");
+          products = await res.json();
+        } catch (e) {
+          products = [
+            {
+              id: 1,
+              name: "Kemeja Pantai",
+              price: 125000,
+              desc: "Kemeja santai, bahan ringan, cocok untuk musim panas.",
+              img: "https://via.placeholder.com/400x300?text=Kemeja+Pantai",
+            },
+            {
+              id: 2,
+              name: "Celana Pendek",
+              price: 90000,
+              desc: "Celana pendek nyaman, mudah dicuci.",
+              img: "https://via.placeholder.com/400x300?text=Celana+Pendek",
+            },
+            {
+              id: 3,
+              name: "Sandal Gunung",
+              price: 175000,
+              desc: "Sandal untuk aktivitas outdoor, nyaman dan tahan lama.",
+              img: "https://via.placeholder.com/400x300?text=Sandal+Gunung",
+            },
+            {
+              id: 4,
+              name: "Tas Punggung",
+              price: 245000,
+              desc: "Tas punggung 20L, banyak kompartemen.",
+              img: "https://via.placeholder.com/400x300?text=Tas+Punggung",
+            },
+            {
+              id: 5,
+              name: "Topi Baseball",
+              price: 65000,
+              desc: "Topi gaya kasual, ukuran one-size.",
+              img: "https://via.placeholder.com/400x300?text=Topi+Baseball",
+            },
+          ];
+          showToast("Mode offline: menggunakan data produk lokal", "warning");
+        }
+        if (productGrid) renderProducts(products);
+      }
+
+      function renderProducts(list) {
+        if (!productGrid) return;
+        productGrid.innerHTML = "";
+        list.forEach((p) => {
+          const card = document.createElement("div");
+          card.className = "card";
+          card.innerHTML = `
+        <img src="${p.img}" alt="${p.name}">
+        <h4>${p.name}</h4>
+        <p>${p.desc}</p>
+        <div class="meta">
+          <div class="price">Rp ${formatCurrency(p.price)}</div>
+          <button class="btn primary" data-id="${p.id}">Tambah</button>
+        </div>
+      `;
+          productGrid.appendChild(card);
+        });
+        document.querySelectorAll(".card .btn").forEach((b) =>
+          b.addEventListener("click", (e) => {
+            const id = Number(e.currentTarget.dataset.id);
+            addToCart(id);
+          })
+        );
+      }
+
+      function addToCart(id) {
+        const p = products.find((x) => x.id === id);
+        if (!p) return;
+        if (cart[id]) cart[id].qty += 1;
+        else
+          cart[id] = {
+            product: p,
+            qty: 1,
+            selected: true,
+            discounted: p.price >= 1000000,
+            discountPercent: p.price >= 1000000 ? 48 : 0,
+          };
+        saveCart();
+        renderCart();
+        showToast("Ditambahkan: " + p.name, "success");
+      }
+
+      function clearSelectedItems() {
+        const selectedIds = Object.keys(cart).filter((id) => cart[id].selected);
+        if (selectedIds.length === 0) {
+          showToast("Pilih item yang akan dihapus", "warning");
+          return;
+        }
+        if (confirm(`Hapus ${selectedIds.length} item terpilih?`)) {
+          selectedIds.forEach((id) => delete cart[id]);
+          saveCart();
+          renderCart();
+          showToast("Item terpilih telah dihapus", "success");
+        }
+      }
+
+      function renderCart() {
+        // Calculate totals first
+        const ids = Object.keys(cart);
+        const totalQty = Object.values(cart).reduce((s, i) => s + i.qty, 0);
+        const subtotal = calcTotal();
+
+        // Update total in cart
+        if (cartCountEl) cartCountEl.textContent = String(totalQty);
+        if (cartTotalEl) cartTotalEl.textContent = formatCurrency(subtotal);
+
+        // If side-cart markup is absent
+        if (!cartItemsEl) {
+          return;
+        }
+        cartItemsEl.innerHTML = "";
+        if (ids.length === 0) {
+          cartItemsEl.innerHTML = "<p>Keranjang kosong</p>";
+          if (cartCountEl) cartCountEl.textContent = "0";
+          if (cartTotalEl) cartTotalEl.textContent = "0";
+          return;
+        }
+
+        // Add cart header section
+        const cartHeader = document.createElement("div");
+        cartHeader.className = "cart-header";
+        cartHeader.innerHTML = `
+          <div class="checkbox-wrap">
+            <input type="checkbox" class="checkbox-style" id="select-all" 
+              ${
+                Object.values(cart).every((item) => item.selected)
+                  ? "checked"
+                  : ""
+              }>
+            <label for="select-all" style="font-weight:500;color:#333">
+              Pilih Semua (${ids.length})
+            </label>
+          </div>
+          <button class="delete-btn" onclick="removeSelectedItems()">
+            Hapus
+          </button>
+        `;
+        cartItemsEl.appendChild(cartHeader);
+
+        // Add select all header
+        const selectAllContainer = document.createElement("div");
+        selectAllContainer.innerHTML = `
+          <div style="display:flex;align-items:center;padding:0.5rem;margin-bottom:1rem;background:#fff;border-radius:8px;border:1px solid #eee;">
+            <div class="checkbox-container">
+              <input type="checkbox" id="select-all-items" checked>
+            </div>
+            <label for="select-all-items" style="margin-left:0.5rem;color:#333">
+              Pilih Semua (${ids.length})
+            </label>
+            <button class="remove-btn" style="margin-left:auto" onclick="clearSelectedItems()">
+              Hapus
+            </button>
+          </div>
+        `;
+        cartItemsEl.appendChild(selectAllContainer);
+        ids.forEach((id) => {
+          const item = cart[id];
+          const el = document.createElement("div");
+          el.className = "cart-item";
+          el.innerHTML = `
+        <img src="${item.product.img}" alt="${item.product.name}">
+        <div style="flex:1">
+          <div style="font-weight:600">${item.product.name}</div>
+          <div style="color:#666">Rp ${formatCurrency(item.product.price)}</div>
+          <div class="qty">
+            <button class="btn" data-action="dec" data-id="${id}">-</button>
+            <span style="padding:0 .5rem">${item.qty}</span>
+            <button class="btn" data-action="inc" data-id="${id}">+</button>
+            <button class="btn" data-action="remove" data-id="${id}" style="margin-left:8px;background:#f5f5f5">Hapus</button>
+          </div>
+        </div>
+      `;
+          cartItemsEl.appendChild(el);
+        });
+        cartItemsEl.querySelectorAll("button").forEach((b) =>
+          b.addEventListener("click", (e) => {
+            const id = e.currentTarget.dataset.id;
+            const act = e.currentTarget.dataset.action;
+            if (act === "inc") {
+              cart[id].qty += 1;
+            } else if (act === "dec") {
+              cart[id].qty -= 1;
+              if (cart[id].qty <= 0) delete cart[id];
+            } else if (act === "remove") {
+              delete cart[id];
+            }
+            saveCart();
+            renderCart();
+          })
+        );
+        if (cartCountEl) cartCountEl.textContent = String(totalQty);
+        if (cartTotalEl) cartTotalEl.textContent = formatCurrency(calcTotal());
+        // Sync payment/order summary with cart
+        try {
+          updatePaymentDetails();
+        } catch (e) {
+          console.warn("updatePaymentDetails error", e);
+        }
+      }
+
+      function calcTotal() {
+        return Object.values(cart).reduce(
+          (s, i) => s + i.product.price * i.qty,
+          0
+        );
+      }
+      function formatCurrency(n) {
+        return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+      }
+
+      function saveCart() {
+        localStorage.setItem("cart", JSON.stringify(cart));
+      }
+
+      function updateItemSelection(id, checked) {
+        if (cart[id]) {
+          cart[id].selected = checked;
+          saveCart();
+          renderCart();
+        }
+      }
+
+      function removeSelectedItems() {
+        const selectedItems = Object.entries(cart).filter(
+          ([_, item]) => item.selected
+        );
+        if (selectedItems.length === 0) {
+          showToast("Pilih item yang akan dihapus", "warning");
+          return;
+        }
+
+        if (confirm(`Hapus ${selectedItems.length} item terpilih?`)) {
+          selectedItems.forEach(([id, _]) => delete cart[id]);
+          saveCart();
+          renderCart();
+          showToast("Item terpilih telah dihapus", "success");
+        }
+      }
+
+      // Add event listener for select all checkbox
+      document.addEventListener("click", (e) => {
+        if (e.target && e.target.id === "select-all") {
+          const checked = e.target.checked;
+          Object.keys(cart).forEach((id) => {
+            cart[id].selected = checked;
+          });
+          saveCart();
+          renderCart();
+        }
+      });
+      function loadCart() {
+        try {
+          cart = JSON.parse(localStorage.getItem("cart") || "{}");
+        } catch (e) {
+          cart = {};
+        }
+      }
+
+      function showToast(msg, type = "info", timeout = 3000) {
+        if (!toastEl) return;
+        const t = document.createElement("div");
+        t.className = "toast-item " + type;
+        t.textContent = msg;
+        toastEl.appendChild(t);
+        setTimeout(() => {
+          t.classList.add("visible");
+        }, 50);
+        setTimeout(() => {
+          t.classList.remove("visible");
+          setTimeout(() => t.remove(), 300);
+        }, timeout);
+      }
+
+      // Initialize Google Maps and Places Autocomplete
+      (function initializeGoogleMaps() {
+        const addressInput = document.getElementById("cust-address");
+        const mapContainer = document.getElementById("map");
+        let map;
+        let marker;
+
+        // Initialize map centered on Indonesia
+        function initMap() {
+          const defaultLocation = { lat: -6.2088, lng: 106.8456 }; // Jakarta
+          map = new google.maps.Map(mapContainer, {
+            zoom: 13,
+            center: defaultLocation,
+            mapTypeControl: false,
+          });
+
+          marker = new google.maps.Marker({
+            map: map,
+            draggable: true,
+            position: defaultLocation,
+          });
+
+          // Initialize Places Autocomplete
+          const autocomplete = new google.maps.places.Autocomplete(
+            addressInput,
+            {
+              componentRestrictions: { country: "id" },
+              fields: ["formatted_address", "geometry", "name"],
+            }
+          );
+
+          // Prevent form submission on address enter
+          addressInput.addEventListener("keydown", function (e) {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              return false;
+            }
+          });
+
+          // Bind autocomplete to map
+          autocomplete.bindTo("bounds", map);
+
+          // Handle place selection
+          autocomplete.addListener("place_changed", function () {
+            const place = autocomplete.getPlace();
+            if (!place.geometry) {
+              showToast("Alamat tidak ditemukan", "warning");
+              return;
+            }
+
+            // Update map
+            map.setCenter(place.geometry.location);
+            marker.setPosition(place.geometry.location);
+            map.setZoom(17);
+
+            // Update address input
+            addressInput.value = place.formatted_address;
+            updateAddressPreview();
+            validateCheckoutForm();
+          });
+
+          // Handle marker drag
+          marker.addListener("dragend", function () {
+            const position = marker.getPosition();
+            if (!position) return;
+
+            // Reverse geocode the coordinates
+            const geocoder = new google.maps.Geocoder();
+            geocoder.geocode(
+              { location: { lat: position.lat(), lng: position.lng() } },
+              (results, status) => {
+                if (status === "OK" && results && results[0]) {
+                  addressInput.value = results[0].formatted_address;
+                  updateAddressPreview();
+                  validateCheckoutForm();
+                }
+              }
+            );
+          });
+        }
+
+        // Get user's location if available
+        if (navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition(
+            (position) => {
+              const pos = {
+                lat: position.coords.latitude,
+                lng: position.coords.longitude,
+              };
+              if (map) {
+                map.setCenter(pos);
+                marker.setPosition(pos);
+                map.setZoom(17);
+
+                // Reverse geocode the location
+                const geocoder = new google.maps.Geocoder();
+                geocoder.geocode({ location: pos }, (results, status) => {
+                  if (status === "OK" && results && results[0]) {
+                    addressInput.value = results[0].formatted_address;
+                    updateAddressPreview();
+                    validateCheckoutForm();
+                  }
+                });
+              }
+            },
+            () => {
+              showToast("Gagal mendapatkan lokasi Anda", "warning");
+            }
+          );
+        }
+
+        // Initialize map when the API is loaded
+        if (window.google && google.maps) {
+          initMap();
+        } else {
+          window.initMap = initMap;
+        }
+      })();
+
+      // Extend form submission to include address image
+      if (checkoutForm) {
+        checkoutForm.addEventListener("submit", async function (e) {
+          e.preventDefault();
+          clearCheckoutErrors();
+
+          // Validate fields
+          const nameEl = document.getElementById("cust-name");
+          const addrEl = document.getElementById("cust-address");
+          const phoneEl = document.getElementById("cust-phone");
+          const name = nameEl?.value?.trim() || "";
+          const address = addrEl?.value?.trim() || "";
+          const phone = phoneEl?.value?.trim() || "";
+
+          let hasError = false;
+          if (name.length < 3) {
+            document.getElementById("err-name").textContent =
+              "Nama harus minimal 3 karakter";
+            hasError = true;
+          }
+          if (address.length < 5) {
+            document.getElementById("err-address").textContent =
+              "Alamat terlalu singkat";
+            hasError = true;
+          }
+          if (!/^\+?[0-9 \-]{6,15}$/.test(phone)) {
+            document.getElementById("err-phone").textContent =
+              "Nomor telepon tidak valid";
+            hasError = true;
+          }
+          if (hasError) return;
+
+          // Create order data object
+          const orderData = {
+            name,
+            address,
+            phone,
+            payment:
+              (document.querySelector('input[name="payment"]:checked') || {})
+                .value || "",
+            bank: document.getElementById("bank")?.value || null,
+            items: Object.values(cart).map((i) => ({
+              productId: i.product.id,
+              qty: i.qty,
+              price: i.product.price,
+            })),
+            total: calcTotal(),
+          };
+
+          const submitBtn = document.getElementById("submit-order");
+          if (submitBtn) submitBtn.disabled = true;
+
+          try {
+            const res = await fetch("/api/orders", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(orderData),
+            });
+            if (!res.ok) throw new Error("Gagal menyimpan order");
+            const data = await res.json();
+            showCheckoutComplete({
+              id: data.id,
+              offline: false,
+              order: orderData,
+            });
+            cart = {};
+            saveCart();
+            renderCart();
+            checkoutForm.reset();
+            showToast("Pesanan terkirim! ID: " + data.id, "success");
+          } catch (err) {
+            const orders = JSON.parse(localStorage.getItem("orders") || "[]");
+            const order = { id: Date.now(), ...orderData };
+            orders.push(order);
+            localStorage.setItem("orders", JSON.stringify(orders));
+            showCheckoutComplete({ id: order.id, offline: true, order });
+            cart = {};
+            saveCart();
+            renderCart();
+            checkoutForm.reset();
+            showToast("Offline: pesanan disimpan secara lokal", "warning");
+          } finally {
+            if (submitBtn) submitBtn.disabled = false;
+          }
+        });
+      }
+
+      // (Maps initialization handled by the initializeGoogleMaps IIFE earlier)
+
+      // Load Google Maps API (uses body[data-gmaps-api-key] if set)
+      (function loadGoogleMaps() {
+        try {
+          const key =
+            (document.body &&
+              document.body.dataset &&
+              document.body.dataset.gmapsApiKey &&
+              document.body.dataset.gmapsApiKey.trim()) ||
+            "";
+          const mapEl = document.getElementById("map");
+          if (!key) {
+            // Do not attempt to load the Maps script with an empty/placeholder key.
+            console.log(
+              "Google Maps API key not provided — skipping script load."
+            );
+            if (mapEl) {
+              mapEl.innerHTML =
+                '<div class="maps-unavailable">Google Maps tidak tersedia. Anda tetap bisa mengetik alamat secara manual, atau untuk menggunakan peta interaktif, tambahkan API key pada atribut <code>data-gmaps-api-key</code> di elemen body.</div>';
+            }
+            return;
+          }
+
+          const s = document.createElement("script");
+          s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(
+            key
+          )}&libraries=places&callback=initMap`;
+          s.async = true;
+          s.defer = true;
+          s.onerror = function () {
+            try {
+              if (mapEl)
+                mapEl.innerHTML =
+                  '<div class="maps-unavailable">Gagal memuat Google Maps. Silakan ketik alamat secara manual atau periksa API key dan koneksi jaringan.</div>';
+            } catch (er) {}
+            try {
+              showToast(
+                "Gagal memuat Google Maps (periksa API key/ jaringan)",
+                "error",
+                5000
+              );
+            } catch (ee) {}
+          };
+          document.head.appendChild(s);
+        } catch (e) {
+          console.warn("Failed to append Google Maps script", e);
+        }
+      })();
+
+    </script>
+  </body>
+</html>
